@@ -14,6 +14,7 @@ AICTE Approval Workflow Automation, Compliance Monitoring and Alert Management p
 - Rule-based automation runner (`POST /api/v1/automation/run`) that scans open cases, routes unassigned cases to the authorised operator running it, flags missing document records and missing internal target dates, refreshes deadline alerts, and writes audit events. `GET /api/v1/automation/status` exposes current workload signals.
 - Tiered overdue follow-up alerts (L1 after 1 day, L2 after 3 days, L3 after 7 days) with level-specific deduplication; `GET /api/v1/automation/escalation-policy` describes the illustrative thresholds. Actual recipient hierarchy and email/SMS delivery are not configured.
 - Local document upload/download API with extension allowlist, size cap and opaque storage names; files are not exposed as static public assets.
+- Configurable, admin-managed document checklist templates by application type; apply templates to applications, link uploaded file records to checklist items, track Missing/Uploaded/Verified/Rejected/Not Applicable statuses, and generate a pre-scrutiny summary for human review. Templates are not official until validated by the competent authority.
 - Role-based sign-in and permissions (admin, officer, reviewer, auditor), signed expiring bearer tokens, hashed demo passwords.
 - Audit events, explainable triage risk score, stage/state summary and CSV export.
 - SQLite-first local run; PostgreSQL remains supported through DATABASE_URL.
