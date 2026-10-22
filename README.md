@@ -20,7 +20,7 @@ AICTE Approval Workflow Automation, Compliance Monitoring and Alert Management p
 
 1. Install Python 3.11+ and Node.js LTS.
 2. Open PowerShell in this project folder.
-3. Run `.` followed by `start.bat` (or double-click `start.bat` from File Explorer).
+3. Run `.\start.bat` (or double-click `start.bat` from File Explorer).
 4. The launcher installs requirements, then opens the API and frontend terminals.
 5. Open http://localhost:5173 and sign in with a demo account below.
 6. API documentation: http://127.0.0.1:8000/docs
