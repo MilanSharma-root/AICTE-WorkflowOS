@@ -11,6 +11,7 @@ AICTE Approval Workflow Automation, Compliance Monitoring and Alert Management p
 - Compliance task register for document validity, undertakings, faculty/infrastructure and other requirements.
 - Time-bound undertakings with due dates and submission tracking.
 - Deadline alert generation, severity, acknowledgement and escalation-oriented queues; an in-process scheduler checks application, compliance, undertaking and upcoming EVC due dates every 15 minutes while the API is running.
+- Rule-based automation runner (`POST /api/v1/automation/run`) that scans open cases, routes unassigned cases to the authorised operator running it, flags missing document records and missing internal target dates, refreshes deadline alerts, and writes audit events. `GET /api/v1/automation/status` exposes current workload signals.
 - Local document upload/download API with extension allowlist, size cap and opaque storage names; files are not exposed as static public assets.
 - Role-based sign-in and permissions (admin, officer, reviewer, auditor), signed expiring bearer tokens, hashed demo passwords.
 - Audit events, explainable triage risk score, stage/state summary and CSV export.
@@ -49,7 +50,7 @@ Uploaded files are stored under `backend/storage/documents` by default and requi
 - Seeded records are synthetic demonstration data, not real institutional applications.
 - Workflow stages are illustrative and configurable, but must be validated against the applicable AICTE Approval Process Handbook (APH), official circulars, jurisdiction and competent-authority rules.
 - The risk score is an explainable prioritisation aid, not an AICTE decision, compliance finding, or substitute for expert review.
-- Email/SMS delivery, eOffice/ERP integration, Aadhaar/digital-signature integration, production-grade identity federation, antivirus scanning, encrypted object storage, migrations and deployment hardening are not enabled by this local prototype.
+- Email/SMS delivery, eOffice/ERP integration, Aadhaar/digital-signature integration, production-grade identity federation, antivirus scanning, encrypted object storage, migrations and deployment hardening are not enabled by this local prototype. The rule-based document pre-scrutiny checks only whether a document record exists; it does not read, authenticate, or judge the contents of a file.
 - Statutory approvals, rejections, EVC outcomes and committee decisions remain under authorised human control. Do not load sensitive personal or institutional documents until security and retention controls are reviewed.
 
 ## APH workflow safeguards
@@ -61,7 +62,7 @@ The prototype's workflow configuration is an administrative configuration aid, n
 - Return/rejection actions require a recorded reason.
 - Every successful transition writes a workflow event and an audit event.
 - Approval/closure remains an authorised human decision; automated reminders and risk indicators are decision support only.
-- Deadline alerts are generated at API startup and checked every 15 minutes while the API process is running, with an additional refresh when the alert endpoint is read. This in-process scheduler is suitable only for a local prototype; production should use a durable scheduled worker and configure notification delivery/escalation channels.
+- Deadline alerts are generated at API startup and checked every 15 minutes while the API process is running, with an additional refresh when the alert endpoint is read. The manual automation runner also assigns unowned cases to the authorised operator running it, flags missing document records and missing internal target dates, and records an audit event. This in-process scheduler is suitable only for a local prototype; production should use a durable scheduled worker and configure notification delivery/escalation channels.
 - EVC, undertaking, compliance and document records are prototype records. Do not use this demo with real institutional or personal data.
 
 ## Verification
