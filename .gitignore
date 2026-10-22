@@ -24,3 +24,6 @@ Thumbs.db
 *.sqlite3
 *.db
 *.log
+
+# Local uploaded documents (never commit institutional files)
+backend/storage/documents/
