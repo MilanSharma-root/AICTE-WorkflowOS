@@ -326,3 +326,27 @@ def test_document_validity_links_only_evidence_from_same_application():
             "application_id": second_id, "document_name": "Wrong application link", "document_id": document_id
         })
         assert mismatch.status_code == 422
+
+
+def test_production_configuration_rejects_default_or_weak_secret():
+    from pydantic import ValidationError
+    from app.config import Settings
+
+    try:
+        Settings(app_env="production", secret_key="CHANGE_THIS_SECRET_FOR_PRODUCTION")
+        assert False, "Production must reject the default secret"
+    except ValidationError:
+        pass
+
+    try:
+        Settings(app_env="production", secret_key="short-secret")
+        assert False, "Production must reject weak secrets"
+    except ValidationError:
+        pass
+
+    secure = Settings(
+        app_env="production",
+        secret_key="a-long-random-secret-key-for-production-at-least-32",
+        cors_origins="https://workflow.example.org",
+    )
+    assert secure.app_env == "production"
