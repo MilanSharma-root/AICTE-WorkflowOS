@@ -205,11 +205,21 @@ def update_application(application_id: int, payload: ApplicationUpdate, db: Sess
 def transition_application(application_id: int, payload: TransitionIn, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "reviewer"))):
     item = db.get(Application, application_id)
     if not item: raise HTTPException(404, "Application not found")
-    if payload.to_stage not in get_workflow_stages(db): raise HTTPException(422, "Unknown workflow stage")
-    if payload.status not in {"Pending", "In Review", "Returned", "Completed", "Rejected"}: raise HTTPException(422, "Unknown workflow status")
+    stages = get_workflow_stages(db)
+    if payload.to_stage not in stages:
+        raise HTTPException(422, "Unknown workflow stage")
+    if payload.status not in {"Pending", "In Review", "Returned", "Completed", "Rejected"}:
+        raise HTTPException(422, "Unknown workflow status")
+    if item.status in {"Completed", "Rejected"} or item.current_stage in TERMINAL_STAGES:
+        raise HTTPException(409, "This application is closed; an authorised administrator must reopen it through a separately recorded action.")
+    if payload.to_stage in {"Returned to Institution", "Rejected"} or payload.status in {"Returned", "Rejected"}:
+        if not (payload.note and payload.note.strip()):
+            raise HTTPException(422, "A reason is required when returning or rejecting an application.")
+    if payload.to_stage == "Approved / Closed" and payload.status not in {"Completed", "In Review", "Pending"}:
+        raise HTTPException(422, "Invalid status for closure.")
     old_stage = item.current_stage
     item.current_stage = payload.to_stage
-    item.status = "Completed" if payload.to_stage == "Approved / Closed" else ("Rejected" if payload.to_stage == "Rejected" else payload.status)
+    item.status = "Completed" if payload.to_stage == "Approved / Closed" else ("Rejected" if payload.to_stage == "Rejected" else ("Returned" if payload.to_stage == "Returned to Institution" else payload.status))
     db.add(WorkflowEvent(application_id=item.id, from_stage=old_stage, to_stage=payload.to_stage, status=item.status, note=payload.note, actor=user.full_name))
     audit(db, "WORKFLOW_TRANSITION", user.full_name, item.id, f"{old_stage} -> {payload.to_stage}; status={item.status}; note={payload.note or ''}")
     db.commit(); db.refresh(item)
