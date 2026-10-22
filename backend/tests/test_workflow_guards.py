@@ -282,6 +282,15 @@ def test_document_validity_lifecycle_and_date_validation():
         bad_status = client.patch(f"/api/v1/document-validity/{item_id}", headers=headers, json={"status": "Auto Approved"})
         assert bad_status.status_code == 422
 
+        expired = client.post("/api/v1/document-validity", headers=headers, json={
+            "application_id": app_id, "document_name": "Expired occupancy certificate",
+            "category": "Occupancy certificate", "expiry_date": "2026-10-01T00:00:00Z"
+        })
+        assert expired.status_code == 201
+        alerts = client.get("/api/v1/alerts", headers=headers)
+        assert alerts.status_code == 200
+        assert any(x["category"] == "Document Validity" and "Expired occupancy certificate" in x["title"] for x in alerts.json())
+
         audit_rows = client.get("/api/v1/audit", headers=headers)
         assert audit_rows.status_code == 200
         assert any(x["action"] == "DOCUMENT_VALIDITY_UPDATED" for x in audit_rows.json())
