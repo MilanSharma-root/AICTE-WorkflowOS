@@ -77,3 +77,33 @@ def test_completed_status_cannot_be_set_at_a_nonterminal_stage():
             json={"to_stage": "Scrutiny", "status": "Completed", "note": "invalid transition test"},
         )
         assert result.status_code == 422
+
+def test_application_type_route_requires_admin_and_validates_stages():
+    with TestClient(app) as client:
+        admin_headers = auth(client)
+        officer_login = client.post("/api/v1/auth/login", json={"username": "officer@demo.local", "password": "Demo@12345"})
+        assert officer_login.status_code == 200
+        officer_headers = {"Authorization": "Bearer " + officer_login.json()["access_token"]}
+        payload = {"application_type": "Demo Custom Type", "stages": ["Application Intake", "Scrutiny", "Approved / Closed", "Rejected"]}
+        assert client.put("/api/v1/workflow/routes", headers=officer_headers, json=payload).status_code == 403
+        invalid = {"application_type": "Demo Custom Type", "stages": ["Application Intake", "Made Up Stage"]}
+        assert client.put("/api/v1/workflow/routes", headers=admin_headers, json=invalid).status_code == 422
+        result = client.put("/api/v1/workflow/routes", headers=admin_headers, json=payload)
+        assert result.status_code == 200
+        assert result.json()["application_type"] == "Demo Custom Type"
+
+def test_application_type_route_restricts_transition_stages():
+    with TestClient(app) as client:
+        headers = auth(client)
+        created = client.post("/api/v1/applications", headers=headers, json={
+            "institution_name": "Route Test Institution", "application_type": "Route Restriction Test",
+            "current_stage": "Application Intake", "priority": "Normal"
+        })
+        assert created.status_code == 201
+        app_id = created.json()["id"]
+        route = {"application_type": "Route Restriction Test", "stages": ["Application Intake", "Scrutiny", "Approved / Closed", "Rejected"]}
+        assert client.put("/api/v1/workflow/routes", headers=headers, json=route).status_code == 200
+        result = client.post(f"/api/v1/applications/{app_id}/transition", headers=headers, json={
+            "to_stage": "EVC Visit", "status": "In Review", "note": "route guard test"
+        })
+        assert result.status_code == 422
