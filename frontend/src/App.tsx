@@ -48,11 +48,12 @@ export default function App(){
   if(!currentToken)return;
   setBusy(true);setError("");
   try{
-   const [meData,s,aa,cc,ee,uu,al,st] = await Promise.all([
+   const al = await request<AlertRow[]>("/api/v1/alerts",currentToken);
+   const [meData,s,aa,cc,ee,uu,st] = await Promise.all([
     request<User>("/api/v1/auth/me",currentToken),request<Summary>("/api/v1/dashboard/summary",currentToken),
     request<AppRow[]>("/api/v1/applications",currentToken),request<Compliance[]>("/api/v1/compliance",currentToken),
     request<EVC[]>("/api/v1/evc",currentToken),request<Undertaking[]>("/api/v1/undertakings",currentToken),
-    request<AlertRow[]>("/api/v1/alerts",currentToken),request<{stages:string[]}>("/api/v1/workflow/stages",currentToken)
+    request<{stages:string[];name?:string}>("/api/v1/workflow/stages",currentToken)
    ]);
    setUser(meData);setSummary(s);setApps(aa);setCompliance(cc);setEvc(ee);setUndertakings(uu);setAlerts(al);setStages(st.stages);setWorkflowName(st.name||"Default approval route");setStageText(st.stages.join("\n"));if(!docAppId&&aa.length)setDocAppId(aa[0].id);
    if(meData.role==="admin"||meData.role==="auditor"){try{setAuditRows(await request<Audit[]>("/api/v1/audit",currentToken));}catch{setAuditRows([]);}}
