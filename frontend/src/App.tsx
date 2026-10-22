@@ -63,7 +63,7 @@ export default function App(){
    const [meData,s,aa,cc,ee,uu,dv,st] = await Promise.all([
     request<User>("/api/v1/auth/me",currentToken),request<Summary>("/api/v1/dashboard/summary",currentToken),
     request<AppRow[]>("/api/v1/applications",currentToken),request<Compliance[]>("/api/v1/compliance",currentToken),
-    request<EVC[]>("/api/v1/evc",currentToken),request<Undertaking[]>("/api/v1/undertakings",currentToken),
+    request<EVC[]>("/api/v1/evc",currentToken),request<Undertaking[]>("/api/v1/undertakings",currentToken),request<DocumentValidityRow[]>("/api/v1/document-validity",currentToken),
     request<{stages:string[];name?:string}>("/api/v1/workflow/stages",currentToken)
    ]);
    setUser(meData);setSummary(s);setApps(aa);setCompliance(cc);setEvc(ee);setUndertakings(uu);setDocumentValidity(dv);setAlerts(al);setStages(st.stages);setWorkflowName(st.name||"Default approval route");setStageText(st.stages.join("\n"));if(!docAppId&&aa.length)setDocAppId(aa[0].id);
