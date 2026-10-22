@@ -6,12 +6,12 @@ AICTE Approval Workflow Automation, Compliance Monitoring and Alert Management p
 
 - React + TypeScript + Vite operations dashboard connected to FastAPI APIs.
 - Application register with create/search/filter, case assignments, due dates and database persistence.
-- Admin-configurable default workflow stages plus application-type-specific routes, stage transitions, return/review notes and per-application workflow history.
+- Admin-configurable default workflow stages plus application-type-specific routes, sequential stage progression, return → re-scrutiny loops, return/rejection reasons and per-application workflow history. Invalid stage skips and inconsistent terminal status combinations are rejected.
 - EVC scheduling, panel notes, status and outcome fields.
 - Compliance task register for document validity, undertakings, faculty/infrastructure and other requirements.
 - Time-bound undertakings with due dates and submission tracking.
 - Deadline alert generation, severity, acknowledgement and escalation-oriented queues; an in-process scheduler checks application, compliance, undertaking and upcoming EVC due dates every 15 minutes while the API is running.
-- Rule-based automation runner (`POST /api/v1/automation/run`) that scans open cases, routes unassigned cases to the authorised operator running it, flags missing document records and missing internal target dates, refreshes deadline alerts, and writes audit events. `GET /api/v1/automation/status` exposes current workload signals.
+- Rule-based automation runner (`POST /api/v1/automation/run`) that scans open cases, routes unassigned cases to the authorised operator running it, flags missing document records, unresolved required checklist items and missing internal target dates, refreshes deadline alerts, and writes audit events. `GET /api/v1/automation/status` exposes live workload signals displayed on the overview dashboard.
 - Tiered overdue follow-up alerts (L1 after 1 day, L2 after 3 days, L3 after 7 days) with level-specific deduplication; `GET /api/v1/automation/escalation-policy` describes the illustrative thresholds. Actual recipient hierarchy and email/SMS delivery are not configured.
 - Local document upload/download API with extension allowlist, size cap and opaque storage names; files are not exposed as static public assets.
 - Configurable, admin-managed document checklist templates by application type; apply templates to applications, link uploaded file records to checklist items, track Missing/Uploaded/Verified/Rejected/Not Applicable statuses, and generate a pre-scrutiny summary for human review. Templates are not official until validated by the competent authority.
@@ -61,7 +61,7 @@ The prototype's workflow configuration is an administrative configuration aid, n
 
 - Workflow transitions reject unknown stages and closed applications cannot be silently transitioned again.
 - Application-type-specific routes can be configured by admins and are enforced when reviewers transition an application; routes use canonical prototype stages and preserve terminal outcomes.
-- Return/rejection actions require a recorded reason.
+- Return/rejection actions require a recorded reason. Normal progression is one configured stage at a time; returned cases resume at re-scrutiny (or the configured scrutiny fallback), and closure requires the Completed status at Approved / Closed.
 - Every successful transition writes a workflow event and an audit event.
 - Approval/closure remains an authorised human decision; automated reminders and risk indicators are decision support only.
 - Deadline alerts are generated at API startup and checked every 15 minutes while the API process is running, with an additional refresh when the alert endpoint is read. The manual automation runner also assigns unowned cases to the authorised operator running it, flags missing document records and missing internal target dates, and records an audit event. This in-process scheduler is suitable only for a local prototype; production should use a durable scheduled worker and configure notification delivery/escalation channels.
