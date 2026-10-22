@@ -294,3 +294,35 @@ def test_document_validity_lifecycle_and_date_validation():
         audit_rows = client.get("/api/v1/audit", headers=headers)
         assert audit_rows.status_code == 200
         assert any(x["action"] == "DOCUMENT_VALIDITY_UPDATED" for x in audit_rows.json())
+
+
+def test_document_validity_links_only_evidence_from_same_application():
+    with TestClient(app) as client:
+        headers = auth(client)
+        first = client.post("/api/v1/applications", headers=headers, json={
+            "institution_name": "Evidence Link Institution A", "application_type": "Extension of Approval"
+        })
+        second = client.post("/api/v1/applications", headers=headers, json={
+            "institution_name": "Evidence Link Institution B", "application_type": "Extension of Approval"
+        })
+        assert first.status_code == 201 and second.status_code == 201
+        first_id, second_id = first.json()["id"], second.json()["id"]
+
+        uploaded = client.post(
+            f"/api/v1/applications/{first_id}/documents",
+            headers=headers,
+            files={"file": ("lease.pdf", b"%PDF-1.4 test fixture", "application/pdf")},
+        )
+        assert uploaded.status_code == 201
+        document_id = uploaded.json()["id"]
+
+        linked = client.post("/api/v1/document-validity", headers=headers, json={
+            "application_id": first_id, "document_name": "Lease deed", "document_id": document_id
+        })
+        assert linked.status_code == 201
+        assert linked.json()["document_id"] == document_id
+
+        mismatch = client.post("/api/v1/document-validity", headers=headers, json={
+            "application_id": second_id, "document_name": "Wrong application link", "document_id": document_id
+        })
+        assert mismatch.status_code == 422
