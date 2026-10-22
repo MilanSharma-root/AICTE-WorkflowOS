@@ -181,3 +181,42 @@ def test_document_checklist_template_is_admin_only():
             "items": [{"key": "one", "label": "Document one", "required": True}]
         })
         assert result.status_code == 403
+
+def test_transition_must_follow_next_configured_stage():
+    with TestClient(app) as client:
+        headers = auth(client)
+        created = client.post("/api/v1/applications", headers=headers, json={
+            "institution_name": "Sequential Route Test", "application_type": "Extension of Approval",
+            "current_stage": "Application Intake", "priority": "Normal"
+        })
+        assert created.status_code == 201
+        app_id = created.json()["id"]
+        skipped = client.post(f"/api/v1/applications/{app_id}/transition", headers=headers, json={
+            "to_stage": "EVC Visit", "status": "In Review", "note": "attempt to skip stages"
+        })
+        assert skipped.status_code == 422
+        next_stage = client.post(f"/api/v1/applications/{app_id}/transition", headers=headers, json={
+            "to_stage": "Scrutiny", "status": "In Review", "note": "normal progression"
+        })
+        assert next_stage.status_code == 200
+        assert next_stage.json()["current_stage"] == "Scrutiny"
+
+
+def test_approved_closed_requires_completed_status_and_final_operational_stage():
+    with TestClient(app) as client:
+        headers = auth(client)
+        created = client.post("/api/v1/applications", headers=headers, json={
+            "institution_name": "Closure Guard Test", "application_type": "Extension of Approval",
+            "current_stage": "Compliance", "priority": "Normal"
+        })
+        assert created.status_code == 201
+        app_id = created.json()["id"]
+        invalid = client.post(f"/api/v1/applications/{app_id}/transition", headers=headers, json={
+            "to_stage": "Approved / Closed", "status": "In Review", "note": "status mismatch"
+        })
+        assert invalid.status_code == 422
+        valid = client.post(f"/api/v1/applications/{app_id}/transition", headers=headers, json={
+            "to_stage": "Approved / Closed", "status": "Completed", "note": "authorised human decision recorded"
+        })
+        assert valid.status_code == 200
+        assert valid.json()["status"] == "Completed"
