@@ -385,9 +385,14 @@ def transition_application(application_id: int, payload: TransitionIn, db: Sessi
     operational_stages = [stage for stage in stages if stage not in {"Re-scrutiny", "Returned to Institution", "Approved / Closed", "Rejected"}]
     if payload.to_stage not in {"Returned to Institution", "Rejected"}:
         if item.current_stage == "Returned to Institution":
-            resume_stage = "Re-scrutiny" if "Re-scrutiny" in operational_stages else ("Scrutiny" if "Scrutiny" in operational_stages else None)
+            resume_stage = "Re-scrutiny" if "Re-scrutiny" in stages else ("Scrutiny" if "Scrutiny" in operational_stages else None)
             if payload.to_stage != resume_stage:
                 raise HTTPException(422, f"A returned application must resume at {resume_stage or 'the configured scrutiny stage'}.")
+        elif item.current_stage == "Re-scrutiny":
+            scrutiny_index = operational_stages.index("Scrutiny") if "Scrutiny" in operational_stages else -1
+            resume_next = operational_stages[scrutiny_index + 1] if 0 <= scrutiny_index + 1 < len(operational_stages) else None
+            if payload.to_stage != resume_next:
+                raise HTTPException(422, f"After re-scrutiny, the next configured stage is {resume_next or 'not available; ask an administrator to review the route'}.")
         elif payload.to_stage == "Approved / Closed":
             if item.current_stage not in operational_stages or operational_stages.index(item.current_stage) != len(operational_stages) - 1:
                 raise HTTPException(422, "An application can reach Approved / Closed only after completing the configured operational stages.")
