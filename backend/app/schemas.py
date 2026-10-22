@@ -77,3 +77,7 @@ class ApplicationOut(BaseModel):
 class WorkflowConfigUpdate(BaseModel):
     name: str = Field(default="Custom approval route", min_length=2, max_length=160)
     stages: list[str] = Field(min_length=2, max_length=30)
+
+class ApplicationWorkflowRouteUpdate(BaseModel):
+    application_type: str = Field(min_length=2, max_length=120)
+    stages: list[str] = Field(min_length=2, max_length=30)
