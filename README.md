@@ -10,7 +10,7 @@ AICTE Approval Workflow Automation, Compliance Monitoring and Alert Management p
 - EVC scheduling, panel notes, status and outcome fields.
 - Compliance task register for document validity, undertakings, faculty/infrastructure and other requirements.
 - Time-bound undertakings with due dates and submission tracking.
-- Deadline alert generation, severity, acknowledgement and escalation-oriented queues.
+- Deadline alert generation, severity, acknowledgement and escalation-oriented queues; an in-process scheduler checks application, compliance, undertaking and upcoming EVC due dates every 15 minutes while the API is running.
 - Local document upload/download API with extension allowlist, size cap and opaque storage names; files are not exposed as static public assets.
 - Role-based sign-in and permissions (admin, officer, reviewer, auditor), signed expiring bearer tokens, hashed demo passwords.
 - Audit events, explainable triage risk score, stage/state summary and CSV export.
@@ -60,7 +60,7 @@ The prototype's workflow configuration is an administrative configuration aid, n
 - Return/rejection actions require a recorded reason.
 - Every successful transition writes a workflow event and an audit event.
 - Approval/closure remains an authorised human decision; automated reminders and risk indicators are decision support only.
-- Deadline alerts are generated from configured record due dates when the alert endpoint is read; production deployment should run a durable scheduled worker and configure notification delivery/escalation channels.
+- Deadline alerts are generated at API startup and checked every 15 minutes while the API process is running, with an additional refresh when the alert endpoint is read. This in-process scheduler is suitable only for a local prototype; production should use a durable scheduled worker and configure notification delivery/escalation channels.
 - EVC, undertaking, compliance and document records are prototype records. Do not use this demo with real institutional or personal data.
 
 ## Verification
