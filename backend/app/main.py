@@ -206,7 +206,10 @@ async def lifespan(app: FastAPI):
             await scheduler_task
 
 app = FastAPI(title=settings.app_name, version="1.0.0", description="AICTE workflow prototype. Configure official rules before production.", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=list(dict.fromkeys([*settings.cors_origin_list, "http://localhost:5173", "http://127.0.0.1:5173"])), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+cors_origins = settings.cors_origin_list
+if settings.app_env.strip().lower() not in {"prod", "production"}:
+    cors_origins = list(dict.fromkeys([*cors_origins, "http://localhost:5173", "http://127.0.0.1:5173"]))
+app.add_middleware(CORSMiddleware, allow_origins=cors_origins, allow_credentials=True, allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allow_headers=["Authorization", "Content-Type"])
 
 @app.get("/health")
 def health():
