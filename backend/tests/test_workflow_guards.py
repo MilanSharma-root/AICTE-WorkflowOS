@@ -107,3 +107,23 @@ def test_application_type_route_restricts_transition_stages():
             "to_stage": "EVC Visit", "status": "In Review", "note": "route guard test"
         })
         assert result.status_code == 422
+
+
+def test_automation_status_and_manual_rule_run_are_available_to_authorized_roles():
+    with TestClient(app) as client:
+        headers = auth(client)
+        status = client.get("/api/v1/automation/status", headers=headers)
+        assert status.status_code == 200
+        assert "unassigned_applications" in status.json()
+        result = client.post("/api/v1/automation/run", headers=headers, json={})
+        assert result.status_code == 200
+        body = result.json()
+        assert "scanned" in body and "alerts_created" in body
+        assert "no approval decision" in body["message"]
+
+def test_automation_run_is_restricted_to_admin_and_officer():
+    with TestClient(app) as client:
+        login_response = client.post("/api/v1/auth/login", json={"username": "auditor@demo.local", "password": "Demo@12345"})
+        assert login_response.status_code == 200
+        headers = {"Authorization": "Bearer " + login_response.json()["access_token"]}
+        assert client.post("/api/v1/automation/run", headers=headers, json={}).status_code == 403
