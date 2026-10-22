@@ -97,3 +97,12 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(40), default="officer")
     password_hash: Mapped[str] = mapped_column(String(255))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+class WorkflowConfiguration(Base):
+    __tablename__ = "workflow_configurations"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(160), default="Default approval route")
+    stages_json: Mapped[str] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_by: Mapped[str] = mapped_column(String(160), default="system")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
