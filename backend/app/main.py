@@ -225,7 +225,7 @@ def application_history(application_id: int, db: Session = Depends(get_db), user
 def dashboard_summary(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
     total = db.scalar(select(func.count()).select_from(Application)) or 0
     pending = db.scalar(select(func.count()).select_from(Application).where(Application.status.in_(["Pending", "In Review", "Returned"]))) or 0
-    overdue = sum(1 for a in db.scalars(select(Application)).all() if a.due_date and safe_dt(a.due_date) < utcnow() and a.status != "Completed")
+    overdue = sum(1 for a in db.scalars(select(Application)).all() if a.due_date and safe_dt(a.due_date) < utcnow() and a.status not in {"Completed", "Rejected"})
     stage_rows = db.execute(select(Application.current_stage, func.count()).group_by(Application.current_stage)).all()
     evc_upcoming = db.scalar(select(func.count()).select_from(EVCVisit).where(EVCVisit.status.in_(["Proposed", "Scheduled"]))) or 0
     compliance_open = db.scalar(select(func.count()).select_from(ComplianceItem).where(ComplianceItem.status != "Verified")) or 0
