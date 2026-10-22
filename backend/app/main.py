@@ -459,8 +459,21 @@ def dashboard_summary(db: Session = Depends(get_db), user: User = Depends(requir
     evc_upcoming = db.scalar(select(func.count()).select_from(EVCVisit).where(EVCVisit.status.in_(["Proposed", "Scheduled"]))) or 0
     compliance_open = db.scalar(select(func.count()).select_from(ComplianceItem).where(ComplianceItem.status != "Verified")) or 0
     alerts_open = db.scalar(select(func.count()).select_from(Alert).where(Alert.acknowledged.is_(False))) or 0
+    now = utcnow()
+    validity_rows = db.scalars(select(DocumentValidity).where(
+        DocumentValidity.status.not_in(["Renewed", "Not Applicable"])
+    )).all()
+    documents_expired = sum(
+        1 for row in validity_rows
+        if row.expiry_date is not None and safe_dt(row.expiry_date) < now
+    )
+    documents_expiring_30_days = sum(
+        1 for row in validity_rows
+        if row.expiry_date is not None and now <= safe_dt(row.expiry_date) <= now + timedelta(days=30)
+    )
     return {"total_applications": total, "pending_applications": pending, "overdue_applications": overdue,
             "evc_upcoming": evc_upcoming, "compliance_open": compliance_open, "alerts_open": alerts_open,
+            "documents_expired": documents_expired, "documents_expiring_30_days": documents_expiring_30_days,
             "stage_counts": [{"stage": stage, "count": count} for stage, count in stage_rows]}
 
 @app.get("/api/v1/compliance")
