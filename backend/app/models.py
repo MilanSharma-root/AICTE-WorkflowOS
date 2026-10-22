@@ -138,3 +138,21 @@ class ApplicationDocumentCheck(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_by: Mapped[str] = mapped_column(String(160), default="system")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DocumentValidity(Base):
+    __tablename__ = "document_validity"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id"), index=True)
+    document_id: Mapped[int | None] = mapped_column(ForeignKey("document_records.id"), nullable=True)
+    document_name: Mapped[str] = mapped_column(String(240))
+    category: Mapped[str] = mapped_column(String(100), default="Lease / ownership")
+    issued_on: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expiry_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    renewal_due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(40), default="Active")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(160), default="system")
+    updated_by: Mapped[str] = mapped_column(String(160), default="system")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
