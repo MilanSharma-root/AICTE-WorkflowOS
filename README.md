@@ -1,23 +1,53 @@
 # AICTE WorkflowOS
 
-A starter platform for AICTE approval workflow tracking, application intake, dashboard summaries, and audit-ready workflow foundations.
+AICTE Approval Workflow Automation, Compliance Monitoring and Alert Management prototype. This is a local development prototype, not an official AICTE service.
 
-## Current prototype
+## Implemented modules
 
-- React + TypeScript + Vite dashboard
-- FastAPI backend
-- SQLAlchemy models for applications and audit events
-- PostgreSQL configuration through environment variables
-- Windows `start.bat` launcher for local development without Docker
-- Synthetic demo records for UI exploration
+- React + TypeScript + Vite operations dashboard connected to FastAPI APIs.
+- Application register with create/search/filter, case assignments, due dates and database persistence.
+- Configurable workflow stages, stage transitions, return/review notes and per-application workflow history.
+- EVC scheduling, panel notes, status and outcome fields.
+- Compliance task register for document validity, undertakings, faculty/infrastructure and other requirements.
+- Time-bound undertakings with due dates and submission tracking.
+- Deadline alert generation, severity, acknowledgement and escalation-oriented queues.
+- Local document upload/download API with extension allowlist, size cap and opaque storage names; files are not exposed as static public assets.
+- Role-based sign-in and permissions (admin, officer, reviewer, auditor), signed expiring bearer tokens, hashed demo passwords.
+- Audit events, explainable triage risk score, stage/state summary and CSV export.
+- SQLite-first local run; PostgreSQL remains supported through DATABASE_URL.
 
-## Run on Windows
+## Windows setup (Docker not required)
 
 1. Install Python 3.11+ and Node.js LTS.
-2. Configure `backend/.env` using `.env.example` and make sure PostgreSQL is running.
-3. Run `start.bat` from this project directory.
-4. Open the frontend at `http://localhost:5173`.
+2. Open PowerShell in this project folder.
+3. Run `.` followed by `start.bat` (or double-click `start.bat` from File Explorer).
+4. The launcher installs requirements, then opens the API and frontend terminals.
+5. Open http://localhost:5173 and sign in with a demo account below.
+6. API documentation: http://127.0.0.1:8000/docs
 
-## Important
+If you already have the project running, stop its backend terminal with Ctrl+C, pull the latest repository changes, then run `start.bat` again so new dependencies and code are loaded.
 
-This is an early prototype. Configure and validate approval pathways, statutory rules, role permissions, deadlines, and notifications against the applicable official AICTE handbook and institutional requirements before real use. Demo records are synthetic; the prototype does not automate or replace statutory scrutiny or decisions by competent authorities.
+## Demo accounts
+
+All prototype accounts use `Demo@12345`:
+
+- `admin@demo.local` — configure workflow stages, review audit trail, manage records.
+- `officer@demo.local` — register applications, schedule EVC, track compliance and undertakings.
+- `reviewer@demo.local` — record workflow transitions and compliance review.
+- `auditor@demo.local` — read-only access and audit trail.
+
+These are public demo credentials. Do not use them for a deployed or real-data environment. Set a long random `SECRET_KEY`, create proper users/passwords, configure HTTPS, backups, retention, access controls and secure storage before any deployment.
+
+## Configuration
+
+The backend reads `backend/.env` when launched from the backend directory. By default, no .env file is required; it uses `sqlite:///./aicte_workflowos.db`. To use PostgreSQL, set a valid SQLAlchemy URL, e.g. `postgresql+psycopg://USER:PASSWORD@HOST:5432/aicte_workflowos`.
+
+Uploaded files are stored under `backend/storage/documents` by default and require authenticated API access to download. Set upload limits and production storage controls appropriate to your environment.
+
+## Important limitations
+
+- Seeded records are synthetic demonstration data, not real institutional applications.
+- Workflow stages are illustrative and configurable, but must be validated against the applicable AICTE Approval Process Handbook (APH), official circulars, jurisdiction and competent-authority rules.
+- The risk score is an explainable prioritisation aid, not an AICTE decision, compliance finding, or substitute for expert review.
+- Email/SMS delivery, eOffice/ERP integration, Aadhaar/digital-signature integration, production-grade identity federation, antivirus scanning, encrypted object storage, migrations and deployment hardening are not enabled by this local prototype.
+- Statutory approvals, rejections, EVC outcomes and committee decisions remain under authorised human control. Do not load sensitive personal or institutional documents until security and retention controls are reviewed.
