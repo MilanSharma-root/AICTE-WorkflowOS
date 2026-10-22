@@ -90,3 +90,24 @@ class DocumentCheckUpdate(BaseModel):
     status: str
     document_id: int | None = None
     notes: str | None = Field(default=None, max_length=2000)
+
+
+class DocumentValidityCreate(BaseModel):
+    application_id: int
+    document_name: str = Field(min_length=2, max_length=240)
+    category: str = Field(default="Lease / ownership", max_length=100)
+    document_id: int | None = None
+    issued_on: datetime | None = None
+    expiry_date: datetime | None = None
+    renewal_due_date: datetime | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+
+class DocumentValidityUpdate(BaseModel):
+    document_name: str | None = Field(default=None, min_length=2, max_length=240)
+    category: str | None = Field(default=None, max_length=100)
+    document_id: int | None = None
+    issued_on: datetime | None = None
+    expiry_date: datetime | None = None
+    renewal_due_date: datetime | None = None
+    status: str | None = None
+    notes: str | None = Field(default=None, max_length=2000)
