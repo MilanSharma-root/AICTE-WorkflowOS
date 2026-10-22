@@ -162,6 +162,10 @@ def test_document_checklist_template_apply_and_pre_scrutiny_summary():
         assert checklist.status_code == 200
         assert checklist.json()["summary"]["missing_required"] == 1
         assert checklist.json()["summary"]["ready_for_human_review"] is False
+        run = client.post("/api/v1/automation/run", headers=headers, json={})
+        assert run.status_code == 200
+        alerts = client.get("/api/v1/alerts", headers=headers)
+        assert any("required checklist items outstanding" in item["title"] for item in alerts.json())
         # Applying the same template twice must not duplicate existing checklist rows.
         again = client.post(f"/api/v1/applications/{app_id}/document-checklist/apply", headers=headers)
         assert again.status_code == 200
