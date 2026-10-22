@@ -220,3 +220,26 @@ def test_approved_closed_requires_completed_status_and_final_operational_stage()
         })
         assert valid.status_code == 200
         assert valid.json()["status"] == "Completed"
+
+def test_returned_application_resumes_at_rescrutiny_then_rejoins_route():
+    with TestClient(app) as client:
+        headers = auth(client)
+        created = client.post("/api/v1/applications", headers=headers, json={
+            "institution_name": "Return Cycle Test", "application_type": "Extension of Approval",
+            "current_stage": "Scrutiny", "priority": "Normal"
+        })
+        assert created.status_code == 201
+        app_id = created.json()["id"]
+        returned = client.post(f"/api/v1/applications/{app_id}/transition", headers=headers, json={
+            "to_stage": "Returned to Institution", "status": "Returned", "note": "Please supply missing evidence."
+        })
+        assert returned.status_code == 200
+        rescrutiny = client.post(f"/api/v1/applications/{app_id}/transition", headers=headers, json={
+            "to_stage": "Re-scrutiny", "status": "In Review", "note": "Updated evidence received."
+        })
+        assert rescrutiny.status_code == 200
+        resumed = client.post(f"/api/v1/applications/{app_id}/transition", headers=headers, json={
+            "to_stage": "EVC Scheduling", "status": "In Review", "note": "Scrutiny recheck complete."
+        })
+        assert resumed.status_code == 200
+        assert resumed.json()["current_stage"] == "EVC Scheduling"
