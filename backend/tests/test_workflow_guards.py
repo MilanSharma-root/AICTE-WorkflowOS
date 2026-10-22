@@ -127,3 +127,12 @@ def test_automation_run_is_restricted_to_admin_and_officer():
         assert login_response.status_code == 200
         headers = {"Authorization": "Bearer " + login_response.json()["access_token"]}
         assert client.post("/api/v1/automation/run", headers=headers, json={}).status_code == 403
+
+
+def test_escalation_policy_exposes_tiered_follow_up_rules():
+    with TestClient(app) as client:
+        response = client.get("/api/v1/automation/escalation-policy", headers=auth(client))
+        assert response.status_code == 200
+        levels = response.json()["levels"]
+        assert [item["level"] for item in levels] == [1, 2, 3]
+        assert "prototype defaults" in response.json()["note"]
