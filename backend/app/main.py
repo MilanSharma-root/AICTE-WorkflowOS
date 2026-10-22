@@ -311,6 +311,15 @@ def run_workflow_automation(db: Session = Depends(get_db), user: User = Depends(
             if not exists:
                 db.add(Alert(application_id=item.id, title=title, message=f"{item.application_no}: no uploaded document records were found. Check the applicable official checklist; this is not a finding of non-compliance.", severity="High", category="Pre-scrutiny"))
                 alerts_created += 1
+        checklist_items = db.scalars(select(ApplicationDocumentCheck).where(ApplicationDocumentCheck.application_id == item.id, ApplicationDocumentCheck.required.is_(True))).all()
+        unresolved = [check for check in checklist_items if check.status not in {"Verified", "Not Applicable"}]
+        if unresolved:
+            title = "Pre-scrutiny: required checklist items outstanding"
+            exists = db.scalar(select(Alert.id).where(Alert.application_id == item.id, Alert.category == "Pre-scrutiny", Alert.title == title, Alert.acknowledged.is_(False)))
+            if not exists:
+                labels = ", ".join(check.label for check in unresolved[:5])
+                db.add(Alert(application_id=item.id, title=title, message=f"{item.application_no}: {len(unresolved)} required checklist item(s) are not verified. Review: {labels}. Human scrutiny is required.", severity="High", category="Pre-scrutiny"))
+                alerts_created += 1
         if item.due_date is None:
             title = "Workflow target date missing"
             exists = db.scalar(select(Alert.id).where(Alert.application_id == item.id, Alert.category == "Automation", Alert.title == title, Alert.acknowledged.is_(False)))
