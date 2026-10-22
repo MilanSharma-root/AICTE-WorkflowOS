@@ -73,3 +73,7 @@ class ApplicationOut(BaseModel):
     due_date: datetime | None
     notes: str | None
     model_config = ConfigDict(from_attributes=True)
+
+class WorkflowConfigUpdate(BaseModel):
+    name: str = Field(default="Custom approval route", min_length=2, max_length=160)
+    stages: list[str] = Field(min_length=2, max_length=30)
