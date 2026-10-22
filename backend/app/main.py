@@ -267,7 +267,7 @@ def escalation_policy(user: User = Depends(require_roles(*ALLOWED_ROLES))):
             {"level": 2, "trigger": "3-6 calendar days overdue", "action": "Create higher-severity in-app escalation alert"},
             {"level": 3, "trigger": "7 or more calendar days overdue", "action": "Create critical in-app escalation alert"}
         ],
-        "note": "Prototype defaults only. Configure and approve actual recipient hierarchy, working-day calendar and notification channels before operational use."
+        "note": "Illustrative prototype defaults only. Configure and approve the actual recipient hierarchy, working-day calendar and notification channels before operational use."
     }
 
 @app.get("/api/v1/automation/status")
