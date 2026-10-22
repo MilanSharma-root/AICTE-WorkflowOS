@@ -252,6 +252,59 @@ def upsert_workflow_route(payload: ApplicationWorkflowRouteUpdate, db: Session =
     db.refresh(row)
     return {"application_type": row.application_type, "stages": cleaned, "updated_by": row.updated_by, "updated_at": row.updated_at}
 
+@app.get("/api/v1/automation/status")
+def automation_status(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    open_apps = db.scalars(select(Application).where(Application.status.not_in(["Completed", "Rejected"]))).all()
+    unassigned = sum(1 for item in open_apps if not (item.assigned_to or "").strip())
+    without_documents = sum(1 for item in open_apps if not db.scalar(select(DocumentRecord.id).where(DocumentRecord.application_id == item.id).limit(1)))
+    without_due_date = sum(1 for item in open_apps if item.due_date is None)
+    overdue = sum(1 for item in open_apps if item.due_date is not None and safe_dt(item.due_date) < utcnow())
+    pending_alerts = db.scalar(select(func.count()).select_from(Alert).where(Alert.acknowledged.is_(False))) or 0
+    return {
+        "enabled": True,
+        "scheduler": "running in API process; deadline scan every 15 minutes",
+        "open_applications": len(open_apps),
+        "unassigned_applications": unassigned,
+        "applications_without_document_records": without_documents,
+        "applications_without_due_dates": without_due_date,
+        "overdue_applications": overdue,
+        "unacknowledged_alerts": pending_alerts,
+        "capabilities": ["deadline monitoring", "rule-based intake checks", "unassigned-case routing", "audit logging"],
+        "limitations": ["document check verifies only whether a file record exists, not content, authenticity or regulatory sufficiency", "notifications are stored in-app; email/SMS delivery is not configured", "statutory decisions remain human-led"]
+    }
+
+@app.post("/api/v1/automation/run")
+def run_workflow_automation(db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer"))):
+    # Safe operational automation: assign unowned cases, flag missing intake evidence,
+    # and refresh deadline alerts. It never approves/rejects or advances statutory stages.
+    open_apps = db.scalars(select(Application).where(Application.status.not_in(["Completed", "Rejected"]))).all()
+    assigned = 0
+    alerts_created = 0
+    checks = []
+    for item in open_apps:
+        if not (item.assigned_to or "").strip():
+            item.assigned_to = user.full_name
+            assigned += 1
+            audit(db, "AUTOMATION_CASE_ASSIGNED", user.full_name, item.id, "Assigned unowned case to the operator running the automation.")
+        has_document = db.scalar(select(DocumentRecord.id).where(DocumentRecord.application_id == item.id).limit(1)) is not None
+        if not has_document:
+            title = "Pre-scrutiny: no document records"
+            exists = db.scalar(select(Alert.id).where(Alert.application_id == item.id, Alert.category == "Pre-scrutiny", Alert.title == title, Alert.acknowledged.is_(False)))
+            if not exists:
+                db.add(Alert(application_id=item.id, title=title, message=f"{item.application_no}: no uploaded document records were found. Check the applicable official checklist; this is not a finding of non-compliance.", severity="High", category="Pre-scrutiny"))
+                alerts_created += 1
+        if item.due_date is None:
+            title = "Workflow target date missing"
+            exists = db.scalar(select(Alert.id).where(Alert.application_id == item.id, Alert.category == "Automation", Alert.title == title, Alert.acknowledged.is_(False)))
+            if not exists:
+                db.add(Alert(application_id=item.id, title=title, message=f"{item.application_no}: set an internal target date after checking the applicable official deadline.", severity="Medium", category="Automation"))
+                alerts_created += 1
+        checks.append({"application_id": item.id, "application_no": item.application_no, "assigned_to": item.assigned_to, "document_record_found": has_document, "target_date_set": item.due_date is not None})
+    sync_deadline_alerts(db)
+    audit(db, "WORKFLOW_AUTOMATION_RUN", user.full_name, None, f"Scanned {len(open_apps)} open cases; assigned {assigned}; created {alerts_created} intake alerts.")
+    db.commit()
+    return {"scanned": len(open_apps), "assigned": assigned, "alerts_created": alerts_created, "checks": checks, "message": "Rule-based checks completed. Review alerts and verify each document checklist manually; no approval decision or workflow-stage change was made."}
+
 @app.get("/api/v1/applications", response_model=list[ApplicationOut])
 def list_applications(q: str | None = None, status: str | None = None, stage: str | None = None,
                       db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
