@@ -8,9 +8,9 @@ AICTE Approval Workflow Automation, Compliance Monitoring and Alert Management p
 - Application register with create/search/filter, case assignments, due dates and database persistence.
 - Admin-configurable default workflow stages plus application-type-specific routes, sequential stage progression, return → re-scrutiny loops, return/rejection reasons and per-application workflow history. Invalid stage skips and inconsistent terminal status combinations are rejected.
 - EVC scheduling, panel notes, status and outcome fields.
-- Compliance task register for document validity, undertakings, faculty/infrastructure and other requirements.
+- Compliance task register for undertakings, faculty/infrastructure and other requirements, plus a dedicated document-validity lifecycle API for lease/ownership and other dated records (issue date, expiry, renewal due date, linked uploaded evidence, status and audit history).
 - Time-bound undertakings with due dates and submission tracking.
-- Deadline alert generation, severity, acknowledgement and escalation-oriented queues; an in-process scheduler checks application, compliance, undertaking and upcoming EVC due dates every 15 minutes while the API is running.
+- Deadline alert generation for applications, compliance tasks, undertakings, EVC visits and expiring/expired document-validity records, with severity, acknowledgement and escalation-oriented queues; an in-process scheduler checks application, compliance, undertaking and upcoming EVC due dates every 15 minutes while the API is running.
 - Rule-based automation runner (`POST /api/v1/automation/run`) that scans open cases, routes unassigned cases to the authorised operator running it, flags missing document records, unresolved required checklist items and missing internal target dates, refreshes deadline alerts, and writes audit events. `GET /api/v1/automation/status` exposes live workload signals displayed on the overview dashboard.
 - Tiered overdue follow-up alerts (L1 after 1 day, L2 after 3 days, L3 after 7 days) with level-specific deduplication; `GET /api/v1/automation/escalation-policy` describes the illustrative thresholds. Actual recipient hierarchy and email/SMS delivery are not configured.
 - Local document upload/download API with extension allowlist, size cap and opaque storage names; files are not exposed as static public assets.
@@ -54,6 +54,14 @@ Uploaded files are stored under `backend/storage/documents` by default and requi
 - The risk score is an explainable prioritisation aid, not an AICTE decision, compliance finding, or substitute for expert review.
 - Email/SMS delivery, eOffice/ERP integration, Aadhaar/digital-signature integration, production-grade identity federation, antivirus scanning, encrypted object storage, migrations and deployment hardening are not enabled by this local prototype. The rule-based document pre-scrutiny checks only whether a document record exists; it does not read, authenticate, or judge the contents of a file.
 - Statutory approvals, rejections, EVC outcomes and committee decisions remain under authorised human control. Do not load sensitive personal or institutional documents until security and retention controls are reviewed.
+
+## Document validity API
+
+- `GET /api/v1/document-validity?application_id=<id>` lists validity records, optionally scoped to an application.
+- `POST /api/v1/document-validity` creates a record with optional linked uploaded evidence, issue date, expiry date and renewal due date.
+- `PATCH /api/v1/document-validity/{id}` updates status/metadata and records an audit event. Supported statuses: Active, Renewal Due, Under Verification, Expired, Renewed, Not Applicable.
+- Expiry monitoring creates in-app alerts within 30 days, with higher severity within 7 days and for expired records. Alert creation is not a legal determination; staff must verify the record and applicable requirements.
+- These APIs extend the prototype database schema; `create_all` creates the new table for fresh/local databases. Existing installations should back up the database before updating.
 
 ## APH workflow safeguards
 
