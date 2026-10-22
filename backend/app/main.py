@@ -550,10 +550,10 @@ def get_application_document_checklist(application_id: int, db: Session = Depend
         raise HTTPException(404, "Application not found")
     checks = db.scalars(select(ApplicationDocumentCheck).where(ApplicationDocumentCheck.application_id == application_id).order_by(ApplicationDocumentCheck.id)).all()
     required = [row for row in checks if row.required and row.status != "Not Applicable"]
-    missing = [row for row in required if row.status == "Missing"]
+    outstanding = [row for row in required if row.status not in {"Verified", "Not Applicable"}]
     return {"application_id": application_id, "application_type": application.application_type,
             "items": [{"id": row.id, "key": row.item_key, "label": row.label, "required": row.required, "status": row.status, "document_id": row.document_id, "notes": row.notes, "updated_by": row.updated_by, "updated_at": row.updated_at} for row in checks],
-            "summary": {"total": len(checks), "required": len(required), "missing_required": len(missing), "verified": sum(row.status == "Verified" for row in checks), "ready_for_human_review": len(required) > 0 and not missing and all(row.status in {"Verified", "Not Applicable"} for row in required)},
+            "summary": {"total": len(checks), "required": len(required), "missing_required": len(outstanding), "verified": sum(row.status == "Verified" for row in checks), "ready_for_human_review": len(required) > 0 and not outstanding},
             "note": "Readiness is a checklist signal only, not a legal compliance finding or approval decision."}
 
 @app.patch("/api/v1/document-checklist-items/{check_id}")
