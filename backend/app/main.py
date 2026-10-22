@@ -12,10 +12,10 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import Base, engine, get_db, SessionLocal
 from app.models import (Alert, Application, AuditEvent, ComplianceItem, DocumentRecord,
-                        EVCVisit, Undertaking, User, WorkflowEvent, WorkflowConfiguration)
+                        EVCVisit, Undertaking, User, WorkflowEvent, WorkflowConfiguration, ApplicationWorkflowRoute)
 from app.schemas import (ApplicationCreate, ApplicationOut, ApplicationUpdate, ComplianceCreate,
                          ComplianceUpdate, EVCVisitCreate, EVCVisitUpdate, LoginIn,
-                         TransitionIn, UndertakingCreate, UndertakingUpdate, WorkflowConfigUpdate)
+                         TransitionIn, UndertakingCreate, UndertakingUpdate, WorkflowConfigUpdate, ApplicationWorkflowRouteUpdate)
 from app.security import create_access_token, hash_password, require_roles, verify_password
 
 WORKFLOW_STAGES = [
@@ -35,6 +35,20 @@ def get_workflow_stages(db: Session) -> list[str]:
         except (ValueError, TypeError):
             pass
     return WORKFLOW_STAGES
+
+def stages_for_application(db: Session, application_type: str) -> list[str]:
+    route = db.scalar(select(ApplicationWorkflowRoute).where(
+        ApplicationWorkflowRoute.application_type == application_type,
+        ApplicationWorkflowRoute.active.is_(True)
+    ))
+    if route:
+        try:
+            stages = json.loads(route.stages_json)
+            if isinstance(stages, list) and len(stages) >= 2:
+                return [str(stage) for stage in stages]
+        except (ValueError, TypeError):
+            pass
+    return get_workflow_stages(db)
 
 def sync_deadline_alerts(db: Session):
     now = utcnow()
@@ -204,6 +218,40 @@ def update_workflow_config(payload: WorkflowConfigUpdate, db: Session = Depends(
     db.add(config); audit(db, "WORKFLOW_CONFIG_UPDATED", user.full_name, None, " -> ".join(cleaned)); db.commit()
     return {"name": config.name, "stages": cleaned, "updated_by": config.updated_by, "updated_at": config.updated_at, "note": "Review this route with competent authorities before operational use."}
 
+@app.get("/api/v1/workflow/routes")
+def list_workflow_routes(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    rows = db.scalars(select(ApplicationWorkflowRoute).where(ApplicationWorkflowRoute.active.is_(True)).order_by(ApplicationWorkflowRoute.application_type)).all()
+    return {
+        "default_stages": get_workflow_stages(db),
+        "routes": [{"application_type": row.application_type, "stages": json.loads(row.stages_json), "updated_by": row.updated_by, "updated_at": row.updated_at} for row in rows],
+        "note": "Illustrative configurable routes only; verify each route against the applicable APH and competent-authority directions."
+    }
+
+@app.put("/api/v1/workflow/routes")
+def upsert_workflow_route(payload: ApplicationWorkflowRouteUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin"))):
+    application_type = payload.application_type.strip()
+    cleaned = [stage.strip() for stage in payload.stages if stage.strip()]
+    if len(application_type) < 2 or len(cleaned) < 2 or len(set(cleaned)) != len(cleaned):
+        raise HTTPException(422, "Provide an application type and at least two unique, non-empty stages")
+    unknown = [stage for stage in cleaned if stage not in WORKFLOW_STAGES]
+    if unknown:
+        raise HTTPException(422, "Stages must use configured canonical stage names: " + ", ".join(unknown))
+    if not TERMINAL_STAGES.issubset(set(cleaned)):
+        raise HTTPException(422, "Each route must preserve both terminal stages: Approved / Closed and Rejected")
+    row = db.scalar(select(ApplicationWorkflowRoute).where(ApplicationWorkflowRoute.application_type == application_type))
+    if row:
+        row.stages_json = json.dumps(cleaned)
+        row.active = True
+        row.updated_by = user.full_name
+        row.updated_at = utcnow()
+    else:
+        row = ApplicationWorkflowRoute(application_type=application_type, stages_json=json.dumps(cleaned), active=True, updated_by=user.full_name, updated_at=utcnow())
+        db.add(row)
+    audit(db, "APPLICATION_WORKFLOW_ROUTE_UPDATED", user.full_name, None, f"{application_type}: " + " -> ".join(cleaned))
+    db.commit()
+    db.refresh(row)
+    return {"application_type": row.application_type, "stages": cleaned, "updated_by": row.updated_by, "updated_at": row.updated_at}
+
 @app.get("/api/v1/applications", response_model=list[ApplicationOut])
 def list_applications(q: str | None = None, status: str | None = None, stage: str | None = None,
                       db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
@@ -247,7 +295,7 @@ def update_application(application_id: int, payload: ApplicationUpdate, db: Sess
 def transition_application(application_id: int, payload: TransitionIn, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "reviewer"))):
     item = db.get(Application, application_id)
     if not item: raise HTTPException(404, "Application not found")
-    stages = get_workflow_stages(db)
+    stages = stages_for_application(db, item.application_type)
     if payload.to_stage not in stages:
         raise HTTPException(422, "Unknown workflow stage")
     if payload.status not in {"Pending", "In Review", "Returned", "Completed", "Rejected"}:
