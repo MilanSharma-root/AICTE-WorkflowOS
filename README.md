@@ -12,6 +12,7 @@ AICTE Approval Workflow Automation, Compliance Monitoring and Alert Management p
 - Time-bound undertakings with due dates and submission tracking.
 - Deadline alert generation, severity, acknowledgement and escalation-oriented queues; an in-process scheduler checks application, compliance, undertaking and upcoming EVC due dates every 15 minutes while the API is running.
 - Rule-based automation runner (`POST /api/v1/automation/run`) that scans open cases, routes unassigned cases to the authorised operator running it, flags missing document records and missing internal target dates, refreshes deadline alerts, and writes audit events. `GET /api/v1/automation/status` exposes current workload signals.
+- Tiered overdue follow-up alerts (L1 after 1 day, L2 after 3 days, L3 after 7 days) with level-specific deduplication; `GET /api/v1/automation/escalation-policy` describes the illustrative thresholds. Actual recipient hierarchy and email/SMS delivery are not configured.
 - Local document upload/download API with extension allowlist, size cap and opaque storage names; files are not exposed as static public assets.
 - Role-based sign-in and permissions (admin, officer, reviewer, auditor), signed expiring bearer tokens, hashed demo passwords.
 - Audit events, explainable triage risk score, stage/state summary and CSV export.
