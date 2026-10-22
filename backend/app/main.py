@@ -12,10 +12,10 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import Base, engine, get_db, SessionLocal
 from app.models import (Alert, Application, AuditEvent, ComplianceItem, DocumentRecord,
-                        EVCVisit, Undertaking, User, WorkflowEvent, WorkflowConfiguration, ApplicationWorkflowRoute)
+                        EVCVisit, Undertaking, User, WorkflowEvent, WorkflowConfiguration, ApplicationWorkflowRoute, DocumentChecklistTemplate, ApplicationDocumentCheck)
 from app.schemas import (ApplicationCreate, ApplicationOut, ApplicationUpdate, ComplianceCreate,
                          ComplianceUpdate, EVCVisitCreate, EVCVisitUpdate, LoginIn,
-                         TransitionIn, UndertakingCreate, UndertakingUpdate, WorkflowConfigUpdate, ApplicationWorkflowRouteUpdate)
+                         TransitionIn, UndertakingCreate, UndertakingUpdate, WorkflowConfigUpdate, ApplicationWorkflowRouteUpdate, DocumentChecklistTemplateUpdate, DocumentCheckUpdate)
 from app.security import create_access_token, hash_password, require_roles, verify_password
 
 WORKFLOW_STAGES = [
@@ -493,6 +493,94 @@ def acknowledge_alert(alert_id: int, db: Session = Depends(get_db), user: User =
     audit(db, "ALERT_ACKNOWLEDGED", user.full_name, item.application_id, item.title)
     db.commit()
     return {"id": item.id, "acknowledged": True, "acknowledged_by": item.acknowledged_by}
+
+@app.get("/api/v1/document-checklists/templates")
+def list_document_checklist_templates(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    rows = db.scalars(select(DocumentChecklistTemplate).where(DocumentChecklistTemplate.active.is_(True)).order_by(DocumentChecklistTemplate.application_type, DocumentChecklistTemplate.id)).all()
+    grouped = {}
+    for row in rows:
+        grouped.setdefault(row.application_type, []).append({"key": row.item_key, "label": row.label, "required": row.required})
+    return {"templates": [{"application_type": key, "items": items} for key, items in sorted(grouped.items())],
+            "note": "Templates are operator-configured examples. Verify required documents against current official instructions before use."}
+
+@app.put("/api/v1/document-checklists/templates")
+def save_document_checklist_template(payload: DocumentChecklistTemplateUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin"))):
+    application_type = payload.application_type.strip()
+    seen = set()
+    cleaned = []
+    for item in payload.items:
+        key = str(item.get("key", "")).strip()
+        label = str(item.get("label", "")).strip()
+        required = item.get("required", True)
+        if not key or len(key) > 80 or not label or len(label) > 240 or not isinstance(required, bool):
+            raise HTTPException(422, "Each checklist item needs a key, label and boolean required flag")
+        if key in seen:
+            raise HTTPException(422, "Checklist item keys must be unique within an application type")
+        seen.add(key)
+        cleaned.append((key, label, required))
+    db.query(DocumentChecklistTemplate).filter(DocumentChecklistTemplate.application_type == application_type).update({DocumentChecklistTemplate.active: False})
+    for key, label, required in cleaned:
+        db.add(DocumentChecklistTemplate(application_type=application_type, item_key=key, label=label, required=required, active=True, updated_by=user.full_name))
+    audit(db, "DOCUMENT_CHECKLIST_TEMPLATE_UPDATED", user.full_name, None, f"{application_type}: {len(cleaned)} checklist item(s)")
+    db.commit()
+    return {"application_type": application_type, "items": [{"key": k, "label": label, "required": required} for k, label, required in cleaned]}
+
+@app.post("/api/v1/applications/{application_id}/document-checklist/apply")
+def apply_document_checklist(application_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer"))):
+    application = db.get(Application, application_id)
+    if not application:
+        raise HTTPException(404, "Application not found")
+    templates = db.scalars(select(DocumentChecklistTemplate).where(DocumentChecklistTemplate.application_type == application.application_type, DocumentChecklistTemplate.active.is_(True)).order_by(DocumentChecklistTemplate.id)).all()
+    if not templates:
+        raise HTTPException(422, "No checklist template configured for this application type. Ask an admin to configure one after verifying official requirements.")
+    existing = {row.template_id for row in db.scalars(select(ApplicationDocumentCheck).where(ApplicationDocumentCheck.application_id == application_id)).all()}
+    added = 0
+    for template in templates:
+        if template.id not in existing:
+            db.add(ApplicationDocumentCheck(application_id=application_id, template_id=template.id, item_key=template.item_key, label=template.label, required=template.required, status="Missing", updated_by=user.full_name))
+            added += 1
+    audit(db, "DOCUMENT_CHECKLIST_APPLIED", user.full_name, application_id, f"Added {added} checklist item(s)")
+    db.commit()
+    return {"application_id": application_id, "items_added": added, "message": "Checklist applied. Verify uploaded documents against each item; upload presence alone does not establish authenticity or sufficiency."}
+
+@app.get("/api/v1/applications/{application_id}/document-checklist")
+def get_application_document_checklist(application_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    application = db.get(Application, application_id)
+    if not application:
+        raise HTTPException(404, "Application not found")
+    checks = db.scalars(select(ApplicationDocumentCheck).where(ApplicationDocumentCheck.application_id == application_id).order_by(ApplicationDocumentCheck.id)).all()
+    required = [row for row in checks if row.required and row.status != "Not Applicable"]
+    missing = [row for row in required if row.status == "Missing"]
+    return {"application_id": application_id, "application_type": application.application_type,
+            "items": [{"id": row.id, "key": row.item_key, "label": row.label, "required": row.required, "status": row.status, "document_id": row.document_id, "notes": row.notes, "updated_by": row.updated_by, "updated_at": row.updated_at} for row in checks],
+            "summary": {"total": len(checks), "required": len(required), "missing_required": len(missing), "verified": sum(row.status == "Verified" for row in checks), "ready_for_human_review": len(required) > 0 and not missing and all(row.status in {"Verified", "Not Applicable"} for row in required)},
+            "note": "Readiness is a checklist signal only, not a legal compliance finding or approval decision."}
+
+@app.patch("/api/v1/document-checklist-items/{check_id}")
+def update_document_check(check_id: int, payload: DocumentCheckUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer"))):
+    check = db.get(ApplicationDocumentCheck, check_id)
+    if not check:
+        raise HTTPException(404, "Checklist item not found")
+    if payload.status not in {"Missing", "Uploaded", "Verified", "Rejected", "Not Applicable"}:
+        raise HTTPException(422, "Invalid checklist status")
+    if payload.document_id is not None:
+        document = db.get(DocumentRecord, payload.document_id)
+        if not document or document.application_id != check.application_id:
+            raise HTTPException(422, "Selected document must belong to the same application")
+    if payload.status in {"Uploaded", "Verified"} and payload.document_id is None and check.document_id is None:
+        raise HTTPException(422, "Select an uploaded document before marking this item Uploaded or Verified")
+    if payload.status == "Rejected" and not (payload.notes or "").strip():
+        raise HTTPException(422, "A reason is required when rejecting a checklist document")
+    check.status = payload.status
+    if payload.document_id is not None:
+        check.document_id = payload.document_id
+    if payload.notes is not None:
+        check.notes = payload.notes
+    check.updated_by = user.full_name
+    check.updated_at = utcnow()
+    audit(db, "DOCUMENT_CHECKLIST_ITEM_UPDATED", user.full_name, check.application_id, f"{check.label}: {check.status}")
+    db.commit()
+    return {"id": check.id, "status": check.status, "document_id": check.document_id, "updated_by": check.updated_by, "updated_at": check.updated_at}
 
 @app.get("/api/v1/applications/{application_id}/documents")
 def list_documents(application_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
