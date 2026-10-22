@@ -6,7 +6,7 @@ AICTE Approval Workflow Automation, Compliance Monitoring and Alert Management p
 
 - React + TypeScript + Vite operations dashboard connected to FastAPI APIs.
 - Application register with create/search/filter, case assignments, due dates and database persistence.
-- Configurable workflow stages, stage transitions, return/review notes and per-application workflow history.
+- Admin-configurable workflow stages, stage transitions, return/review notes and per-application workflow history.
 - EVC scheduling, panel notes, status and outcome fields.
 - Compliance task register for document validity, undertakings, faculty/infrastructure and other requirements.
 - Time-bound undertakings with due dates and submission tracking.
