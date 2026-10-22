@@ -60,6 +60,13 @@ def sync_deadline_alerts(db: Session):
         if title and not db.scalar(select(Alert.id).where(Alert.application_id == item.id, Alert.category == "Deadline", Alert.title == title)):
             due_text = "target date has passed" if days < 0 else "action due in " + str(max(0, int(days))) + " day(s)"
             db.add(Alert(application_id=item.id, title=title, message=f"{item.institution_name}: {due_text}. Review and escalate where appropriate.", severity="Critical" if days < 0 else "High", category="Deadline"))
+        # Escalation alerts are level-specific and deduplicated independently.
+        if days < 0:
+            overdue_days = int(abs(days))
+            level = 3 if overdue_days >= 7 else (2 if overdue_days >= 3 else 1)
+            level_title = f"Escalation L{level}: overdue application"
+            if not db.scalar(select(Alert.id).where(Alert.application_id == item.id, Alert.category == "Escalation", Alert.title == level_title)):
+                db.add(Alert(application_id=item.id, title=level_title, message=f"{item.application_no} is {overdue_days} day(s) overdue. Level {level} follow-up is due; notify/refer to the designated authority according to locally approved escalation policy.", severity="Critical" if level >= 2 else "High", category="Escalation"))
     for item in db.scalars(select(ComplianceItem).where(ComplianceItem.status.not_in(["Verified", "Submitted"]))).all():
         if not item.due_date:
             continue
@@ -251,6 +258,17 @@ def upsert_workflow_route(payload: ApplicationWorkflowRouteUpdate, db: Session =
     db.commit()
     db.refresh(row)
     return {"application_type": row.application_type, "stages": cleaned, "updated_by": row.updated_by, "updated_at": row.updated_at}
+
+@app.get("/api/v1/automation/escalation-policy")
+def escalation_policy(user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    return {
+        "levels": [
+            {"level": 1, "trigger": "1-2 calendar days overdue", "action": "Create in-app follow-up alert"},
+            {"level": 2, "trigger": "3-6 calendar days overdue", "action": "Create higher-severity in-app escalation alert"},
+            {"level": 3, "trigger": "7 or more calendar days overdue", "action": "Create critical in-app escalation alert"}
+        ],
+        "note": "Prototype defaults only. Configure and approve actual recipient hierarchy, working-day calendar and notification channels before operational use."
+    }
 
 @app.get("/api/v1/automation/status")
 def automation_status(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
