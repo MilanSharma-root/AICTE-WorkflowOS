@@ -222,7 +222,6 @@ def application_history(application_id: int, db: Session = Depends(get_db), user
 
 @app.get("/api/v1/dashboard/summary")
 def dashboard_summary(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
-    sync_deadline_alerts(db)
     total = db.scalar(select(func.count()).select_from(Application)) or 0
     pending = db.scalar(select(func.count()).select_from(Application).where(Application.status.in_(["Pending", "In Review", "Returned"]))) or 0
     overdue = sum(1 for a in db.scalars(select(Application)).all() if a.due_date and safe_dt(a.due_date) < utcnow() and a.status != "Completed")
