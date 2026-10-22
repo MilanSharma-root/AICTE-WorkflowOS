@@ -43,7 +43,7 @@ export default function App(){
  const [busy,setBusy]=useState(false),[error,setError]=useState(""),[toast,setToast]=useState("");
  const [docAppId,setDocAppId]=useState(0),[documents,setDocuments]=useState<DocumentRow[]>([]),[selectedFile,setSelectedFile]=useState<File|null>(null);
  const [workflowName,setWorkflowName]=useState("Default approval route"),[stageText,setStageText]=useState("");
- const [routeType,setRouteType]=useState("New Institution"),[routeStagesText,setRouteStagesText]=useState("Application Intake\\nScrutiny\\nEVC Scheduling\\nEVC Visit\\nSAC/SHC Review\\nCompliance\\nApproved / Closed\\nRejected");
+ const [routeType,setRouteType]=useState("New Institution"),[routeStagesText,setRouteStagesText]=useState("Application Intake\nScrutiny\nEVC Scheduling\nEVC Visit\nSAC/SHC Review\nCompliance\nApproved / Closed\nRejected");
  const [applicationRoutes,setApplicationRoutes]=useState<WorkflowRoute[]>([]);
  const [newApp,setNewApp]=useState(false),[transitionApp,setTransitionApp]=useState<AppRow|null>(null);
  const [workflowHistory,setWorkflowHistory]=useState<WorkflowEvent[]>([]),[historyBusy,setHistoryBusy]=useState(false),[historyError,setHistoryError]=useState("");
@@ -115,7 +115,7 @@ export default function App(){
  async function saveWorkflowConfig(e:FormEvent<HTMLFormElement>){e.preventDefault();const next=stageText.split("\n").map(x=>x.trim()).filter(Boolean);try{const result=await request<{name:string;stages:string[]}>("/api/v1/workflow/config",token,{method:"PUT",body:JSON.stringify({name:workflowName,stages:next})});setStages(result.stages);setStageText(result.stages.join("\n"));notify("Workflow configuration saved. Review with competent authorities before operational use.");await loadAll();}catch(err){notify(err instanceof Error?err.message:"Could not save workflow");}}
  async function saveApplicationRoute(e:FormEvent<HTMLFormElement>){
   e.preventDefault();
-  const next=routeStagesText.split("\\n").map(x=>x.trim()).filter(Boolean);
+  const next=routeStagesText.split("\n").map(x=>x.trim()).filter(Boolean);
   try{
    const result=await request<WorkflowRoute>("/api/v1/workflow/routes",token,{method:"PUT",body:JSON.stringify({application_type:routeType,stages:next})});
    setApplicationRoutes(previous=>[...previous.filter(route=>route.application_type!==result.application_type),result].sort((a,b)=>a.application_type.localeCompare(b.application_type)));
