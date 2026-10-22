@@ -6,7 +6,7 @@ AICTE Approval Workflow Automation, Compliance Monitoring and Alert Management p
 
 - React + TypeScript + Vite operations dashboard connected to FastAPI APIs.
 - Application register with create/search/filter, case assignments, due dates and database persistence.
-- Admin-configurable workflow stages, stage transitions, return/review notes and per-application workflow history.
+- Admin-configurable default workflow stages plus application-type-specific routes, stage transitions, return/review notes and per-application workflow history.
 - EVC scheduling, panel notes, status and outcome fields.
 - Compliance task register for document validity, undertakings, faculty/infrastructure and other requirements.
 - Time-bound undertakings with due dates and submission tracking.
@@ -57,6 +57,7 @@ Uploaded files are stored under `backend/storage/documents` by default and requi
 The prototype's workflow configuration is an administrative configuration aid, not a substitute for a legally approved APH rule engine. The 2024–2027 APH describes different processing paths by application category (see Table 2.3 and the relevant clauses), so an operator must validate the selected route and deadlines with authorised AICTE officials before operational use.
 
 - Workflow transitions reject unknown stages and closed applications cannot be silently transitioned again.
+- Application-type-specific routes can be configured by admins and are enforced when reviewers transition an application; routes use canonical prototype stages and preserve terminal outcomes.
 - Return/rejection actions require a recorded reason.
 - Every successful transition writes a workflow event and an audit event.
 - Approval/closure remains an authorised human decision; automated reminders and risk indicators are decision support only.
