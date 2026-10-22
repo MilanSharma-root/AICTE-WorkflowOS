@@ -43,7 +43,8 @@ def sync_deadline_alerts(db: Session):
         days = (safe_dt(item.due_date) - now).total_seconds() / 86400
         title = "Overdue workflow item" if days < 0 else ("Deadline approaching" if days <= 3 else None)
         if title and not db.scalar(select(Alert.id).where(Alert.application_id == item.id, Alert.category == "Deadline", Alert.title == title)):
-            db.add(Alert(application_id=item.id, title=title, message=f"{item.institution_name}: {'target date has passed' if days < 0 else f'action due in {max(0, int(days))} day(s)'}. Review and escalate where appropriate.", severity="Critical" if days < 0 else "High", category="Deadline"))
+            due_text = "target date has passed" if days < 0 else "action due in " + str(max(0, int(days))) + " day(s)"
+            db.add(Alert(application_id=item.id, title=title, message=f"{item.institution_name}: {due_text}. Review and escalate where appropriate.", severity="Critical" if days < 0 else "High", category="Deadline"))
     for item in db.scalars(select(ComplianceItem).where(ComplianceItem.status.not_in(["Verified", "Submitted"]))).all():
         if not item.due_date:
             continue
