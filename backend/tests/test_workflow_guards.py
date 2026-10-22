@@ -62,3 +62,18 @@ def test_return_transition_requires_a_reason():
             json={"to_stage": "Returned to Institution", "status": "Returned", "note": ""},
         )
         assert response.status_code == 422
+
+def test_completed_status_cannot_be_set_at_a_nonterminal_stage():
+    with TestClient(app) as client:
+        headers = auth(client)
+        response = client.get("/api/v1/applications", headers=headers)
+        assert response.status_code == 200
+        candidate = next((item for item in response.json() if item["status"] not in {"Completed", "Rejected"} and item["current_stage"] not in {"Approved / Closed", "Rejected"}), None)
+        if candidate is None:
+            return
+        result = client.post(
+            f"/api/v1/applications/{candidate['id']}/transition",
+            headers=headers,
+            json={"to_stage": "Scrutiny", "status": "Completed", "note": "invalid transition test"},
+        )
+        assert result.status_code == 422
