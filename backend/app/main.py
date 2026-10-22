@@ -12,10 +12,10 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import Base, engine, get_db, SessionLocal
 from app.models import (Alert, Application, AuditEvent, ComplianceItem, DocumentRecord,
-                        EVCVisit, Undertaking, User, WorkflowEvent, WorkflowConfiguration, ApplicationWorkflowRoute, DocumentChecklistTemplate, ApplicationDocumentCheck)
+                        EVCVisit, Undertaking, User, WorkflowEvent, WorkflowConfiguration, ApplicationWorkflowRoute, DocumentChecklistTemplate, ApplicationDocumentCheck, DocumentValidity)
 from app.schemas import (ApplicationCreate, ApplicationOut, ApplicationUpdate, ComplianceCreate,
                          ComplianceUpdate, EVCVisitCreate, EVCVisitUpdate, LoginIn,
-                         TransitionIn, UndertakingCreate, UndertakingUpdate, WorkflowConfigUpdate, ApplicationWorkflowRouteUpdate, DocumentChecklistTemplateUpdate, DocumentCheckUpdate)
+                         TransitionIn, UndertakingCreate, UndertakingUpdate, WorkflowConfigUpdate, ApplicationWorkflowRouteUpdate, DocumentChecklistTemplateUpdate, DocumentCheckUpdate, DocumentValidityCreate, DocumentValidityUpdate)
 from app.security import create_access_token, hash_password, require_roles, verify_password
 
 WORKFLOW_STAGES = [
@@ -83,6 +83,19 @@ def sync_deadline_alerts(db: Session):
             title = "Undertaking deadline: " + item.title
             if not db.scalar(select(Alert.id).where(Alert.application_id == item.application_id, Alert.category == "Undertaking", Alert.title == title)):
                 db.add(Alert(application_id=item.application_id, title=title, message=f"Undertaking '{item.title}' is {'overdue' if days < 0 else 'due soon'}.", severity="Critical" if days < 0 else "High", category="Undertaking"))
+    for item in db.scalars(select(DocumentValidity).where(DocumentValidity.status.not_in(["Renewed", "Not Applicable"]))).all():
+        if not item.expiry_date:
+            continue
+        days = (safe_dt(item.expiry_date) - now).total_seconds() / 86400
+        if days > 30:
+            continue
+        state = "expired" if days < 0 else ("expires within 7 days" if days <= 7 else "expires within 30 days")
+        title = f"Document validity: {item.document_name} {state}"
+        if not db.scalar(select(Alert.id).where(Alert.application_id == item.application_id, Alert.category == "Document Validity", Alert.title == title)):
+            severity = "Critical" if days < 0 else ("High" if days <= 7 else "Medium")
+            db.add(Alert(application_id=item.application_id, title=title,
+                         message=f"{item.document_name} ({item.category}) {state}. Confirm the underlying record, applicable requirements and renewal action with an authorised reviewer.",
+                         severity=severity, category="Document Validity"))
     for item in db.scalars(select(EVCVisit).where(EVCVisit.status.in_(["Proposed", "Scheduled"]))).all():
         if not item.proposed_date:
             continue
@@ -470,6 +483,61 @@ def update_compliance(item_id: int, payload: ComplianceUpdate, db: Session = Dep
     audit(db, "COMPLIANCE_UPDATED", user.full_name, item.application_id, f"{item.title}: {item.status}")
     db.commit(); db.refresh(item)
     return {"id": item.id, "application_id": item.application_id, "title": item.title, "category": item.category, "due_date": item.due_date, "status": item.status, "assigned_to": item.assigned_to, "notes": item.notes}
+
+@app.get("/api/v1/document-validity")
+def list_document_validity(application_id: int | None = None, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    stmt = select(DocumentValidity).order_by(DocumentValidity.expiry_date.asc())
+    if application_id is not None:
+        stmt = stmt.where(DocumentValidity.application_id == application_id)
+    rows = db.scalars(stmt).all()
+    return [{
+        "id": x.id, "application_id": x.application_id, "application_no": db.get(Application, x.application_id).application_no if db.get(Application, x.application_id) else None,
+        "document_id": x.document_id, "document_name": x.document_name, "category": x.category,
+        "issued_on": x.issued_on, "expiry_date": x.expiry_date, "renewal_due_date": x.renewal_due_date,
+        "status": x.status, "notes": x.notes, "created_by": x.created_by, "updated_by": x.updated_by,
+        "created_at": x.created_at, "updated_at": x.updated_at
+    } for x in rows]
+
+@app.post("/api/v1/document-validity", status_code=201)
+def create_document_validity(payload: DocumentValidityCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer"))):
+    application = db.get(Application, payload.application_id)
+    if not application:
+        raise HTTPException(404, "Application not found")
+    if payload.document_id is not None:
+        document = db.get(DocumentRecord, payload.document_id)
+        if not document or document.application_id != application.id:
+            raise HTTPException(422, "Linked document must belong to the selected application")
+    if payload.issued_on and payload.expiry_date and safe_dt(payload.expiry_date) < safe_dt(payload.issued_on):
+        raise HTTPException(422, "Expiry date cannot be earlier than issue date")
+    item = DocumentValidity(**payload.model_dump(), status="Active", created_by=user.full_name, updated_by=user.full_name)
+    db.add(item); db.flush()
+    audit(db, "DOCUMENT_VALIDITY_CREATED", user.full_name, application.id, f"{item.document_name}; expiry={item.expiry_date}; renewal_due={item.renewal_due_date}")
+    db.commit(); db.refresh(item)
+    return {"id": item.id, "application_id": item.application_id, "document_name": item.document_name, "category": item.category, "document_id": item.document_id, "issued_on": item.issued_on, "expiry_date": item.expiry_date, "renewal_due_date": item.renewal_due_date, "status": item.status, "notes": item.notes, "created_by": item.created_by, "updated_by": item.updated_by, "created_at": item.created_at, "updated_at": item.updated_at}
+
+@app.patch("/api/v1/document-validity/{item_id}")
+def update_document_validity(item_id: int, payload: DocumentValidityUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer"))):
+    item = db.get(DocumentValidity, item_id)
+    if not item:
+        raise HTTPException(404, "Document validity record not found")
+    changes = payload.model_dump(exclude_unset=True)
+    if "status" in changes and changes["status"] not in {"Active", "Renewal Due", "Under Verification", "Expired", "Renewed", "Not Applicable"}:
+        raise HTTPException(422, "Unsupported document validity status")
+    if "document_id" in changes and changes["document_id"] is not None:
+        document = db.get(DocumentRecord, changes["document_id"])
+        if not document or document.application_id != item.application_id:
+            raise HTTPException(422, "Linked document must belong to the same application")
+    issue = changes.get("issued_on", item.issued_on)
+    expiry = changes.get("expiry_date", item.expiry_date)
+    if issue and expiry and safe_dt(expiry) < safe_dt(issue):
+        raise HTTPException(422, "Expiry date cannot be earlier than issue date")
+    for key, value in changes.items():
+        setattr(item, key, value)
+    item.updated_by = user.full_name
+    item.updated_at = utcnow()
+    audit(db, "DOCUMENT_VALIDITY_UPDATED", user.full_name, item.application_id, f"{item.document_name}; changed={','.join(changes.keys())}; status={item.status}")
+    db.commit(); db.refresh(item)
+    return {"id": item.id, "application_id": item.application_id, "document_name": item.document_name, "category": item.category, "document_id": item.document_id, "issued_on": item.issued_on, "expiry_date": item.expiry_date, "renewal_due_date": item.renewal_due_date, "status": item.status, "notes": item.notes, "updated_by": item.updated_by, "updated_at": item.updated_at}
 
 @app.get("/api/v1/undertakings")
 def list_undertakings(application_id: int | None = None, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
