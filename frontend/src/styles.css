@@ -244,3 +244,6 @@ tbody tr:last-child td { border-bottom: 0; }
 .automation-metrics strong { color: #173653; font-size: 23px; }
 .automation-foot { padding: 12px 18px; color: #75869a; font-size: 10px; line-height: 1.6; background: #fbfcfe; border-top: 1px solid #edf1f6; }
 @media(max-width:700px) { .automation-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); } .checklist-actions { grid-template-columns: minmax(120px,1fr); min-width: 150px; } }
+
+.top-signout { padding: 8px 10px; }
+@media(max-width:800px) { .top-signout { padding: 7px 8px; font-size: 10px; } }
