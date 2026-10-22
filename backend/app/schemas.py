@@ -81,3 +81,12 @@ class WorkflowConfigUpdate(BaseModel):
 class ApplicationWorkflowRouteUpdate(BaseModel):
     application_type: str = Field(min_length=2, max_length=120)
     stages: list[str] = Field(min_length=2, max_length=30)
+
+class DocumentChecklistTemplateUpdate(BaseModel):
+    application_type: str = Field(min_length=2, max_length=120)
+    items: list[dict] = Field(min_length=1, max_length=100)
+
+class DocumentCheckUpdate(BaseModel):
+    status: str
+    document_id: int | None = None
+    notes: str | None = Field(default=None, max_length=2000)
