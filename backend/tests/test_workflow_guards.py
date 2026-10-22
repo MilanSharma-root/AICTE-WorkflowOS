@@ -243,3 +243,45 @@ def test_returned_application_resumes_at_rescrutiny_then_rejoins_route():
         })
         assert resumed.status_code == 200
         assert resumed.json()["current_stage"] == "EVC Scheduling"
+
+
+def test_document_validity_lifecycle_and_date_validation():
+    with TestClient(app) as client:
+        headers = auth(client)
+        created = client.post("/api/v1/applications", headers=headers, json={
+            "institution_name": "Validity Test Institution", "application_type": "Extension of Approval"
+        })
+        assert created.status_code == 201
+        app_id = created.json()["id"]
+
+        invalid = client.post("/api/v1/document-validity", headers=headers, json={
+            "application_id": app_id, "document_name": "Lease deed",
+            "issued_on": "2026-10-20T00:00:00Z", "expiry_date": "2026-10-01T00:00:00Z"
+        })
+        assert invalid.status_code == 422
+
+        result = client.post("/api/v1/document-validity", headers=headers, json={
+            "application_id": app_id, "document_name": "Lease deed",
+            "category": "Lease / ownership", "expiry_date": "2026-11-15T00:00:00Z",
+            "renewal_due_date": "2026-11-01T00:00:00Z"
+        })
+        assert result.status_code == 201
+        item_id = result.json()["id"]
+        assert result.json()["status"] == "Active"
+
+        listed = client.get(f"/api/v1/document-validity?application_id={app_id}", headers=headers)
+        assert listed.status_code == 200
+        assert any(x["id"] == item_id for x in listed.json())
+
+        patched = client.patch(f"/api/v1/document-validity/{item_id}", headers=headers, json={
+            "status": "Under Verification", "notes": "Renewal evidence submitted for review"
+        })
+        assert patched.status_code == 200
+        assert patched.json()["status"] == "Under Verification"
+
+        bad_status = client.patch(f"/api/v1/document-validity/{item_id}", headers=headers, json={"status": "Auto Approved"})
+        assert bad_status.status_code == 422
+
+        audit_rows = client.get("/api/v1/audit", headers=headers)
+        assert audit_rows.status_code == 200
+        assert any(x["action"] == "DOCUMENT_VALIDITY_UPDATED" for x in audit_rows.json())
