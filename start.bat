@@ -25,8 +25,6 @@ if not exist "backend\.venv\Scripts\python.exe" (
   if errorlevel 1 goto :fail
 )
 echo [2/5] Installing backend dependencies...
-call backend\.venv\Scripts\python.exe -m pip install --upgrade pip
-if errorlevel 1 goto :fail
 call backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 if errorlevel 1 goto :fail
 echo [3/5] Installing frontend dependencies...
@@ -45,7 +43,7 @@ start "AICTE WorkflowOS - Frontend" cmd /k "cd /d ""%~dp0frontend"" && npm run d
 timeout /t 3 /nobreak >nul
 start "" "http://localhost:5173"
 echo.
-echo Launcher commands sent. If the database is not configured, backend API calls may fail.
+echo Launcher commands sent. SQLite is used by default; PostgreSQL can be configured in backend\.env.
 echo Frontend: http://localhost:5173
 echo Backend API docs: http://127.0.0.1:8000/docs
 echo.
