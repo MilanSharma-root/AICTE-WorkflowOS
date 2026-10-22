@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
-import csv, io
+import csv, io, json
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
@@ -11,10 +11,10 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import Base, engine, get_db, SessionLocal
 from app.models import (Alert, Application, AuditEvent, ComplianceItem, DocumentRecord,
-                        EVCVisit, Undertaking, User, WorkflowEvent)
+                        EVCVisit, Undertaking, User, WorkflowEvent, WorkflowConfiguration)
 from app.schemas import (ApplicationCreate, ApplicationOut, ApplicationUpdate, ComplianceCreate,
                          ComplianceUpdate, EVCVisitCreate, EVCVisitUpdate, LoginIn,
-                         TransitionIn, UndertakingCreate, UndertakingUpdate)
+                         TransitionIn, UndertakingCreate, UndertakingUpdate, WorkflowConfigUpdate)
 from app.security import create_access_token, hash_password, require_roles, verify_password
 
 WORKFLOW_STAGES = [
@@ -23,6 +23,36 @@ WORKFLOW_STAGES = [
     "Returned to Institution", "Rejected"
 ]
 TERMINAL_STAGES = {"Approved / Closed", "Rejected"}
+
+def get_workflow_stages(db: Session) -> list[str]:
+    config = db.scalar(select(WorkflowConfiguration).where(WorkflowConfiguration.active.is_(True)).order_by(WorkflowConfiguration.updated_at.desc()))
+    if config:
+        try:
+            stages = json.loads(config.stages_json)
+            if isinstance(stages, list) and len(stages) >= 2:
+                return [str(stage) for stage in stages]
+        except (ValueError, TypeError):
+            pass
+    return WORKFLOW_STAGES
+
+def sync_deadline_alerts(db: Session):
+    now = utcnow()
+    for item in db.scalars(select(Application).where(Application.status.not_in(["Completed", "Rejected"]))).all():
+        if not item.due_date:
+            continue
+        days = (safe_dt(item.due_date) - now).total_seconds() / 86400
+        title = "Overdue workflow item" if days < 0 else ("Deadline approaching" if days <= 3 else None)
+        if title and not db.scalar(select(Alert.id).where(Alert.application_id == item.id, Alert.category == "Deadline", Alert.title == title)):
+            db.add(Alert(application_id=item.id, title=title, message=f"{item.institution_name}: {'target date has passed' if days < 0 else f'action due in {max(0, int(days))} day(s)'}. Review and escalate where appropriate.", severity="Critical" if days < 0 else "High", category="Deadline"))
+    for item in db.scalars(select(ComplianceItem).where(ComplianceItem.status.not_in(["Verified", "Submitted"]))).all():
+        if not item.due_date:
+            continue
+        days = (safe_dt(item.due_date) - now).total_seconds() / 86400
+        if days <= 3:
+            title = "Compliance deadline: " + item.title
+            if not db.scalar(select(Alert.id).where(Alert.application_id == item.application_id, Alert.category == "Compliance", Alert.title == title)):
+                db.add(Alert(application_id=item.application_id, title=title, message=f"Compliance item '{item.title}' is {'overdue' if days < 0 else 'due soon'}.", severity="Critical" if days < 0 else "High", category="Compliance"))
+    db.commit()
 ALLOWED_ROLES = {"admin", "officer", "reviewer", "auditor"}
 
 def utcnow():
@@ -90,6 +120,9 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         seed_demo_data(db)
+        if not db.scalar(select(func.count()).select_from(WorkflowConfiguration)):
+            db.add(WorkflowConfiguration(name="Default approval route", stages_json=json.dumps(WORKFLOW_STAGES), active=True, updated_by="system"))
+            db.commit()
     finally:
         db.close()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
@@ -114,8 +147,19 @@ def me(user: User = Depends(require_roles(*ALLOWED_ROLES))):
     return {"username": user.username, "full_name": user.full_name, "role": user.role}
 
 @app.get("/api/v1/workflow/stages")
-def workflow_stages(user: User = Depends(require_roles(*ALLOWED_ROLES))):
-    return {"stages": WORKFLOW_STAGES, "note": "Illustrative default pathway. Confirm the applicable AICTE Approval Process Handbook and authority-specific routing before operational use."}
+def workflow_stages(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    config = db.scalar(select(WorkflowConfiguration).where(WorkflowConfiguration.active.is_(True)).order_by(WorkflowConfiguration.updated_at.desc()))
+    return {"name": config.name if config else "Default approval route", "stages": get_workflow_stages(db), "updated_by": config.updated_by if config else "system", "note": "Configure this illustrative pathway against the applicable AICTE Approval Process Handbook and authority-specific routing before operational use."}
+
+@app.put("/api/v1/workflow/config")
+def update_workflow_config(payload: WorkflowConfigUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin"))):
+    cleaned = [stage.strip() for stage in payload.stages if stage.strip()]
+    if len(cleaned) < 2 or len(set(cleaned)) != len(cleaned):
+        raise HTTPException(422, "Provide at least two unique, non-empty workflow stages")
+    db.query(WorkflowConfiguration).update({WorkflowConfiguration.active: False})
+    config = WorkflowConfiguration(name=payload.name, stages_json=json.dumps(cleaned), active=True, updated_by=user.full_name, updated_at=utcnow())
+    db.add(config); audit(db, "WORKFLOW_CONFIG_UPDATED", user.full_name, None, " -> ".join(cleaned)); db.commit()
+    return {"name": config.name, "stages": cleaned, "updated_by": config.updated_by, "updated_at": config.updated_at, "note": "Review this route with competent authorities before operational use."}
 
 @app.get("/api/v1/applications", response_model=list[ApplicationOut])
 def list_applications(q: str | None = None, status: str | None = None, stage: str | None = None,
@@ -160,7 +204,7 @@ def update_application(application_id: int, payload: ApplicationUpdate, db: Sess
 def transition_application(application_id: int, payload: TransitionIn, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "reviewer"))):
     item = db.get(Application, application_id)
     if not item: raise HTTPException(404, "Application not found")
-    if payload.to_stage not in WORKFLOW_STAGES: raise HTTPException(422, "Unknown workflow stage")
+    if payload.to_stage not in get_workflow_stages(db): raise HTTPException(422, "Unknown workflow stage")
     if payload.status not in {"Pending", "In Review", "Returned", "Completed", "Rejected"}: raise HTTPException(422, "Unknown workflow status")
     old_stage = item.current_stage
     item.current_stage = payload.to_stage
@@ -178,6 +222,7 @@ def application_history(application_id: int, db: Session = Depends(get_db), user
 
 @app.get("/api/v1/dashboard/summary")
 def dashboard_summary(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    sync_deadline_alerts(db)
     total = db.scalar(select(func.count()).select_from(Application)) or 0
     pending = db.scalar(select(func.count()).select_from(Application).where(Application.status.in_(["Pending", "In Review", "Returned"]))) or 0
     overdue = sum(1 for a in db.scalars(select(Application)).all() if a.due_date and safe_dt(a.due_date) < utcnow() and a.status != "Completed")
@@ -259,6 +304,7 @@ def update_evc(visit_id: int, payload: EVCVisitUpdate, db: Session = Depends(get
 
 @app.get("/api/v1/alerts")
 def list_alerts(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    sync_deadline_alerts(db)
     rows = db.scalars(select(Alert).order_by(Alert.created_at.desc())).all()
     return [{"id": a.id, "application_id": a.application_id, "application_no": db.get(Application, a.application_id).application_no if a.application_id and db.get(Application, a.application_id) else "", "title": a.title, "message": a.message, "severity": a.severity, "category": a.category, "acknowledged": a.acknowledged, "created_at": a.created_at, "acknowledged_by": a.acknowledged_by} for a in rows]
 
