@@ -378,6 +378,26 @@ def transition_application(application_id: int, payload: TransitionIn, db: Sessi
     stages = stages_for_application(db, item.application_type)
     if payload.to_stage not in stages:
         raise HTTPException(422, "Unknown workflow stage")
+    if item.current_stage not in stages:
+        raise HTTPException(409, "The current stage is not present in this application's active route. An administrator must reconcile the route before continuing.")
+    # Enforce configured route order: normal progression is one stage at a time.
+    # Return/reject are explicit review outcomes; returned cases resume at re-scrutiny.
+    operational_stages = [stage for stage in stages if stage not in {"Returned to Institution", "Approved / Closed", "Rejected"}]
+    if payload.to_stage not in {"Returned to Institution", "Rejected"}:
+        if item.current_stage == "Returned to Institution":
+            resume_stage = "Re-scrutiny" if "Re-scrutiny" in operational_stages else ("Scrutiny" if "Scrutiny" in operational_stages else None)
+            if payload.to_stage != resume_stage:
+                raise HTTPException(422, f"A returned application must resume at {resume_stage or 'the configured scrutiny stage'}.")
+        elif payload.to_stage == "Approved / Closed":
+            if item.current_stage not in operational_stages or operational_stages.index(item.current_stage) != len(operational_stages) - 1:
+                raise HTTPException(422, "An application can reach Approved / Closed only after completing the configured operational stages.")
+        else:
+            if item.current_stage not in operational_stages:
+                raise HTTPException(422, "This application cannot progress from its current stage through the configured route.")
+            current_index = operational_stages.index(item.current_stage)
+            if current_index + 1 >= len(operational_stages) or payload.to_stage != operational_stages[current_index + 1]:
+                expected = operational_stages[current_index + 1] if current_index + 1 < len(operational_stages) else "Approved / Closed"
+                raise HTTPException(422, f"Invalid stage progression. The next configured stage is {expected}.")
     if payload.status not in {"Pending", "In Review", "Returned", "Completed", "Rejected"}:
         raise HTTPException(422, "Unknown workflow status")
     if item.status in {"Completed", "Rejected"} or item.current_stage in TERMINAL_STAGES:
@@ -387,6 +407,8 @@ def transition_application(application_id: int, payload: TransitionIn, db: Sessi
             raise HTTPException(422, "A reason is required when returning or rejecting an application.")
     if payload.status == "Completed" and payload.to_stage != "Approved / Closed":
         raise HTTPException(422, "Completed status is only valid at the Approved / Closed stage.")
+    if payload.to_stage == "Approved / Closed" and payload.status != "Completed":
+        raise HTTPException(422, "Approved / Closed requires Completed status; record the authorised human decision explicitly.")
     if payload.status == "Rejected" and payload.to_stage != "Rejected":
         raise HTTPException(422, "Rejected status is only valid at the Rejected stage.")
     if payload.status == "Returned" and payload.to_stage != "Returned to Institution":
