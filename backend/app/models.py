@@ -113,3 +113,28 @@ class ApplicationWorkflowRoute(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_by: Mapped[str] = mapped_column(String(160), default="system")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+class DocumentChecklistTemplate(Base):
+    __tablename__ = "document_checklist_templates"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    application_type: Mapped[str] = mapped_column(String(120), index=True)
+    item_key: Mapped[str] = mapped_column(String(80))
+    label: Mapped[str] = mapped_column(String(240))
+    required: Mapped[bool] = mapped_column(Boolean, default=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_by: Mapped[str] = mapped_column(String(160), default="system")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+class ApplicationDocumentCheck(Base):
+    __tablename__ = "application_document_checks"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id"), index=True)
+    template_id: Mapped[int | None] = mapped_column(ForeignKey("document_checklist_templates.id"), nullable=True)
+    item_key: Mapped[str] = mapped_column(String(80))
+    label: Mapped[str] = mapped_column(String(240))
+    required: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(40), default="Missing")
+    document_id: Mapped[int | None] = mapped_column(ForeignKey("document_records.id"), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_by: Mapped[str] = mapped_column(String(160), default="system")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
