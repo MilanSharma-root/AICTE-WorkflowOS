@@ -13,7 +13,7 @@ AICTE Approval Workflow Automation, Compliance Monitoring and Alert Management p
 - Deadline alert generation for applications, compliance tasks, undertakings, EVC visits and expiring/expired document-validity records, with severity, acknowledgement and escalation-oriented queues; an in-process scheduler checks application, compliance, undertaking and upcoming EVC due dates every 15 minutes while the API is running.
 - Rule-based automation runner (`POST /api/v1/automation/run`) that scans open cases, routes unassigned cases to the authorised operator running it, flags missing document records, unresolved required checklist items and missing internal target dates, refreshes deadline alerts, and writes audit events. `GET /api/v1/automation/status` exposes live workload signals displayed on the overview dashboard.
 - Tiered overdue follow-up alerts (L1 after 1 day, L2 after 3 days, L3 after 7 days) with level-specific deduplication; `GET /api/v1/automation/escalation-policy` describes the illustrative thresholds. Actual recipient hierarchy and email/SMS delivery are not configured.
-- Local document upload/download API with extension allowlist, size cap and opaque storage names; files are not exposed as static public assets.
+- Local document upload/download API with extension allowlist, size cap and opaque storage names; files are not exposed as static public assets. Document validity records can link to evidence uploaded for the same application.
 - Configurable, admin-managed document checklist templates by application type; apply templates to applications, link uploaded file records to checklist items, track Missing/Uploaded/Verified/Rejected/Not Applicable statuses, and generate a pre-scrutiny summary for human review. Templates are not official until validated by the competent authority.
 - Role-based sign-in and permissions (admin, officer, reviewer, auditor), signed expiring bearer tokens, hashed demo passwords.
 - Audit events, explainable triage risk score, stage/state summary and CSV export.
@@ -44,6 +44,8 @@ These are public demo credentials. Do not use them for a deployed or real-data e
 ## Configuration
 
 The backend reads `backend/.env` when launched from the backend directory. By default, no .env file is required; it uses `sqlite:///./aicte_workflowos.db`. To use PostgreSQL, set a valid SQLAlchemy URL, e.g. `postgresql+psycopg://USER:PASSWORD@HOST:5432/aicte_workflowos`.
+
+For production, set `APP_ENV=production`, a cryptographically random `SECRET_KEY` of at least 32 characters, explicit HTTPS frontend origins in `CORS_ORIGINS`, and a durable `DATABASE_URL`. Production startup rejects the demo/default secret, weak secrets, and wildcard CORS. Localhost frontend origins are added automatically only outside production. Keep the public demo credentials disabled/changed before any deployment.
 
 Uploaded files are stored under `backend/storage/documents` by default and require authenticated API access to download. Set upload limits and production storage controls appropriate to your environment.
 
@@ -76,6 +78,8 @@ The prototype's workflow configuration is an administrative configuration aid, n
 - EVC, undertaking, compliance and document records are prototype records. Do not use this demo with real institutional or personal data.
 
 ## Verification
+
+GitHub Actions CI runs the backend test suite and the frontend TypeScript/Vite production build on pushes to `main` / `ui/premium-government-dashboard` and on pull requests targeting `main`.
 
 From `backend`, activate the project virtual environment and run:
 
