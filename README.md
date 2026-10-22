@@ -5,6 +5,7 @@ AICTE Approval Workflow Automation, Compliance Monitoring and Alert Management p
 ## Implemented modules
 
 - React + TypeScript + Vite operations dashboard connected to FastAPI APIs.
+- Live dashboard metrics include application/workflow counts plus document records expiring within 30 days and already expired records, calculated from the backend database.
 - Application register with create/search/filter, case assignments, due dates and database persistence.
 - Admin-configurable default workflow stages plus application-type-specific routes, sequential stage progression, return → re-scrutiny loops, return/rejection reasons and per-application workflow history. Invalid stage skips and inconsistent terminal status combinations are rejected.
 - EVC scheduling, panel notes, status and outcome fields.
