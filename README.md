@@ -51,3 +51,31 @@ Uploaded files are stored under `backend/storage/documents` by default and requi
 - The risk score is an explainable prioritisation aid, not an AICTE decision, compliance finding, or substitute for expert review.
 - Email/SMS delivery, eOffice/ERP integration, Aadhaar/digital-signature integration, production-grade identity federation, antivirus scanning, encrypted object storage, migrations and deployment hardening are not enabled by this local prototype.
 - Statutory approvals, rejections, EVC outcomes and committee decisions remain under authorised human control. Do not load sensitive personal or institutional documents until security and retention controls are reviewed.
+
+## APH workflow safeguards
+
+The prototype's workflow configuration is an administrative configuration aid, not a substitute for a legally approved APH rule engine. The 2024–2027 APH describes different processing paths by application category (see Table 2.3 and the relevant clauses), so an operator must validate the selected route and deadlines with authorised AICTE officials before operational use.
+
+- Workflow transitions reject unknown stages and closed applications cannot be silently transitioned again.
+- Return/rejection actions require a recorded reason.
+- Every successful transition writes a workflow event and an audit event.
+- Approval/closure remains an authorised human decision; automated reminders and risk indicators are decision support only.
+- Deadline alerts are generated from configured record due dates when the alert endpoint is read; production deployment should run a durable scheduled worker and configure notification delivery/escalation channels.
+- EVC, undertaking, compliance and document records are prototype records. Do not use this demo with real institutional or personal data.
+
+## Verification
+
+From `backend`, activate the project virtual environment and run:
+
+```powershell
+python -m pytest -q
+```
+
+From `frontend`, run:
+
+```powershell
+npm ci
+npm run build
+```
+
+A passing local build/test run is still required after pulling changes. This repository does not claim certification, regulatory approval, or integration with official AICTE systems.
