@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -53,7 +54,40 @@ def sync_deadline_alerts(db: Session):
             title = "Compliance deadline: " + item.title
             if not db.scalar(select(Alert.id).where(Alert.application_id == item.application_id, Alert.category == "Compliance", Alert.title == title)):
                 db.add(Alert(application_id=item.application_id, title=title, message=f"Compliance item '{item.title}' is {'overdue' if days < 0 else 'due soon'}.", severity="Critical" if days < 0 else "High", category="Compliance"))
+    for item in db.scalars(select(Undertaking).where(Undertaking.submitted.is_(False))).all():
+        if not item.due_date:
+            continue
+        days = (safe_dt(item.due_date) - now).total_seconds() / 86400
+        if days <= 3:
+            title = "Undertaking deadline: " + item.title
+            if not db.scalar(select(Alert.id).where(Alert.application_id == item.application_id, Alert.category == "Undertaking", Alert.title == title)):
+                db.add(Alert(application_id=item.application_id, title=title, message=f"Undertaking '{item.title}' is {'overdue' if days < 0 else 'due soon'}.", severity="Critical" if days < 0 else "High", category="Undertaking"))
+    for item in db.scalars(select(EVCVisit).where(EVCVisit.status.in_(["Proposed", "Scheduled"]))).all():
+        if not item.proposed_date:
+            continue
+        days = (safe_dt(item.proposed_date) - now).total_seconds() / 86400
+        if days <= 3:
+            title = "EVC visit approaching"
+            if not db.scalar(select(Alert.id).where(Alert.application_id == item.application_id, Alert.category == "EVC", Alert.title == title)):
+                db.add(Alert(application_id=item.application_id, title=title, message=f"EVC visit for application #{item.application_id} is {'overdue' if days < 0 else 'scheduled soon'}. Confirm panel and logistics.", severity="Critical" if days < 0 else "High", category="EVC"))
     db.commit()
+
+def run_deadline_sync():
+    db = SessionLocal()
+    try:
+        sync_deadline_alerts(db)
+    finally:
+        db.close()
+
+async def deadline_scheduler():
+    # A local in-process scheduler for the prototype. Production should use a durable worker.
+    while True:
+        await asyncio.sleep(15 * 60)
+        try:
+            await asyncio.to_thread(run_deadline_sync)
+        except Exception:
+            # Keep the API alive; the next interval will retry.
+            continue
 ALLOWED_ROLES = {"admin", "officer", "reviewer", "auditor"}
 
 def utcnow():
@@ -127,7 +161,15 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
-    yield
+    # Generate due-date alerts on startup and keep checking without waiting for a user to open Alerts.
+    await asyncio.to_thread(run_deadline_sync)
+    scheduler_task = asyncio.create_task(deadline_scheduler())
+    try:
+        yield
+    finally:
+        scheduler_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await scheduler_task
 
 app = FastAPI(title=settings.app_name, version="1.0.0", description="AICTE workflow prototype. Configure official rules before production.", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -215,6 +257,12 @@ def transition_application(application_id: int, payload: TransitionIn, db: Sessi
     if payload.to_stage in {"Returned to Institution", "Rejected"} or payload.status in {"Returned", "Rejected"}:
         if not (payload.note and payload.note.strip()):
             raise HTTPException(422, "A reason is required when returning or rejecting an application.")
+    if payload.status == "Completed" and payload.to_stage != "Approved / Closed":
+        raise HTTPException(422, "Completed status is only valid at the Approved / Closed stage.")
+    if payload.status == "Rejected" and payload.to_stage != "Rejected":
+        raise HTTPException(422, "Rejected status is only valid at the Rejected stage.")
+    if payload.status == "Returned" and payload.to_stage != "Returned to Institution":
+        raise HTTPException(422, "Returned status is only valid at the Returned to Institution stage.")
     if payload.to_stage == "Approved / Closed" and payload.status not in {"Completed", "In Review", "Pending"}:
         raise HTTPException(422, "Invalid status for closure.")
     old_stage = item.current_stage
