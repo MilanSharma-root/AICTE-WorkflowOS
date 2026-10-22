@@ -382,7 +382,7 @@ def transition_application(application_id: int, payload: TransitionIn, db: Sessi
         raise HTTPException(409, "The current stage is not present in this application's active route. An administrator must reconcile the route before continuing.")
     # Enforce configured route order: normal progression is one stage at a time.
     # Return/reject are explicit review outcomes; returned cases resume at re-scrutiny.
-    operational_stages = [stage for stage in stages if stage not in {"Returned to Institution", "Approved / Closed", "Rejected"}]
+    operational_stages = [stage for stage in stages if stage not in {"Re-scrutiny", "Returned to Institution", "Approved / Closed", "Rejected"}]
     if payload.to_stage not in {"Returned to Institution", "Rejected"}:
         if item.current_stage == "Returned to Institution":
             resume_stage = "Re-scrutiny" if "Re-scrutiny" in operational_stages else ("Scrutiny" if "Scrutiny" in operational_stages else None)
