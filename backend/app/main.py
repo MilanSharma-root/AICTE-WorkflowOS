@@ -598,12 +598,13 @@ def update_document_check(check_id: int, payload: DocumentCheckUpdate, db: Sessi
         document = db.get(DocumentRecord, payload.document_id)
         if not document or document.application_id != check.application_id:
             raise HTTPException(422, "Selected document must belong to the same application")
-    if payload.status in {"Uploaded", "Verified"} and payload.document_id is None and check.document_id is None:
+    resulting_document_id = payload.document_id if "document_id" in payload.model_fields_set else check.document_id
+    if payload.status in {"Uploaded", "Verified"} and resulting_document_id is None:
         raise HTTPException(422, "Select an uploaded document before marking this item Uploaded or Verified")
-    if payload.status == "Rejected" and not (payload.notes or "").strip():
+    if payload.status == "Rejected" and not (payload.notes or check.notes or "").strip():
         raise HTTPException(422, "A reason is required when rejecting a checklist document")
     check.status = payload.status
-    if payload.document_id is not None:
+    if "document_id" in payload.model_fields_set:
         check.document_id = payload.document_id
     if payload.notes is not None:
         check.notes = payload.notes
