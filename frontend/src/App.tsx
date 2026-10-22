@@ -48,7 +48,7 @@ export default function App(){
  const [documentChecks,setDocumentChecks]=useState<DocumentCheck[]>([]),[checklistSummary,setChecklistSummary]=useState<{total:number;required:number;missing_required:number;verified:number;ready_for_human_review:boolean}|null>(null),[checklistBusy,setChecklistBusy]=useState(false);
  const [checklistType,setChecklistType]=useState("New Institution"),[checklistTemplateText,setChecklistTemplateText]=useState("application-form | Application form | true\nidentity-proof | Institution identity proof | true");
  const [workflowName,setWorkflowName]=useState("Default approval route"),[stageText,setStageText]=useState("");
- const [routeType,setRouteType]=useState("New Institution"),[routeStagesText,setRouteStagesText]=useState("Application Intake\nScrutiny\nEVC Scheduling\nEVC Visit\nSAC/SHC Review\nCompliance\nApproved / Closed\nRejected");
+ const [routeType,setRouteType]=useState("New Institution"),[routeStagesText,setRouteStagesText]=useState("Application Intake\nScrutiny\nRe-scrutiny\nEVC Scheduling\nEVC Visit\nSAC/SHC Review\nCompliance\nReturned to Institution\nApproved / Closed\nRejected");
  const [applicationRoutes,setApplicationRoutes]=useState<WorkflowRoute[]>([]);
  const [newApp,setNewApp]=useState(false),[transitionApp,setTransitionApp]=useState<AppRow|null>(null);
  const [workflowHistory,setWorkflowHistory]=useState<WorkflowEvent[]>([]),[historyBusy,setHistoryBusy]=useState(false),[historyError,setHistoryError]=useState("");
