@@ -1,67 +1,346 @@
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from fastapi import Depends, FastAPI
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from uuid import uuid4
+import csv, io
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.config import settings
-from app.database import Base, engine, get_db
-from app.models import Application, AuditEvent
-from app.schemas import ApplicationCreate, ApplicationOut
+from app.database import Base, engine, get_db, SessionLocal
+from app.models import (Alert, Application, AuditEvent, ComplianceItem, DocumentRecord,
+                        EVCVisit, Undertaking, User, WorkflowEvent)
+from app.schemas import (ApplicationCreate, ApplicationOut, ApplicationUpdate, ComplianceCreate,
+                         ComplianceUpdate, EVCVisitCreate, EVCVisitUpdate, LoginIn,
+                         TransitionIn, UndertakingCreate, UndertakingUpdate)
+from app.security import create_access_token, hash_password, require_roles, verify_password
+
+WORKFLOW_STAGES = [
+    "Application Intake", "Scrutiny", "Re-scrutiny", "EVC Scheduling",
+    "EVC Visit", "SAC/SHC Review", "Compliance", "Approved / Closed",
+    "Returned to Institution", "Rejected"
+]
+TERMINAL_STAGES = {"Approved / Closed", "Rejected"}
+ALLOWED_ROLES = {"admin", "officer", "reviewer", "auditor"}
+
+def utcnow():
+    return datetime.now(timezone.utc)
+
+def safe_dt(value):
+    if value is None: return None
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+def audit(db: Session, action: str, actor: str, application_id: int | None = None, details: str | None = None):
+    db.add(AuditEvent(application_id=application_id, action=action, actor=actor, details=details))
+
+def seed_demo_data(db: Session):
+    if not db.scalar(select(func.count()).select_from(User)):
+        demo_users = [
+            ("admin@demo.local", "Demo Administrator", "admin"),
+            ("officer@demo.local", "Case Officer", "officer"),
+            ("reviewer@demo.local", "Scrutiny Reviewer", "reviewer"),
+            ("auditor@demo.local", "Audit Viewer", "auditor"),
+        ]
+        for username, full_name, role in demo_users:
+            db.add(User(username=username, full_name=full_name, role=role, password_hash=hash_password("Demo@12345")))
+    if db.scalar(select(func.count()).select_from(Application)):
+        db.commit()
+        return
+    now = utcnow()
+    sample = [
+        ("North Valley Institute of Technology", "Uttar Pradesh", "Extension of Approval", "Scrutiny", "High", 2),
+        ("Saraswati College of Engineering", "Rajasthan", "New Institution", "EVC Scheduling", "High", 5),
+        ("Eastern Institute of Management", "Bihar", "Increase in Intake", "SAC/SHC Review", "Normal", 8),
+        ("Riverbend Technical Campus", "Madhya Pradesh", "Extension of Approval", "Compliance", "Normal", -2),
+        ("Central Polytechnic Institute", "Uttarakhand", "New Course", "Application Intake", "Low", 12),
+        ("Pioneer School of Applied Sciences", "Haryana", "New Institution", "Re-scrutiny", "High", 1),
+    ]
+    for i, (name, state, app_type, stage, priority, days) in enumerate(sample, start=1):
+        item = Application(
+            application_no=f"AICTE-{now.year}-{i:06d}", institution_name=name, state=state,
+            application_type=app_type, current_stage=stage,
+            status="Completed" if stage == "Approved / Closed" else ("In Review" if stage in {"EVC Scheduling", "SAC/SHC Review", "Re-scrutiny"} else "Pending"),
+            priority=priority, assigned_to=["R. Mehta", "A. Sharma", "S. Rao", "K. Singh", "P. Nair", "M. Verma"][i-1],
+            submitted_at=now-timedelta(days=20+i*3), due_date=now+timedelta(days=days),
+            notes="Synthetic demonstration record; replace with verified institutional data."
+        )
+        db.add(item)
+        db.flush()
+        db.add(WorkflowEvent(application_id=item.id, from_stage=None, to_stage=stage, status=item.status, actor="system", note="Seeded synthetic demo record"))
+        db.add(AuditEvent(application_id=item.id, action="DEMO_RECORD_CREATED", actor="system", details="Synthetic seed data"))
+        if i in (1, 4, 5):
+            db.add(ComplianceItem(application_id=item.id, title=["Scrutiny evidence verification", "Lease deed validity check", "Faculty undertaking"][ [1,4,5].index(i) ],
+                                  category="Document validity" if i == 4 else "Undertaking",
+                                  due_date=now+timedelta(days=days), status="Pending", assigned_to=item.assigned_to,
+                                  notes="Demo checklist item; confirm official requirements."))
+        if i == 2:
+            db.add(EVCVisit(application_id=item.id, proposed_date=now+timedelta(days=7), location="Institution campus",
+                            panel_members="Panel assignment pending", status="Proposed"))
+        if days <= 2:
+            db.add(Alert(application_id=item.id, title="Deadline approaching", message=f"{item.institution_name}: action due in {days} day(s).", severity="High", category="Deadline"))
+        if days < 0:
+            db.add(Alert(application_id=item.id, title="Overdue workflow item", message=f"{item.institution_name}: target date has passed; review and escalate if required.", severity="Critical", category="Escalation"))
+    db.commit()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        seed_demo_data(db)
+    finally:
+        db.close()
+    Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     yield
 
-app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = FastAPI(title=settings.app_name, version="1.0.0", description="AICTE workflow prototype. Configure official rules before production.", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": settings.app_name}
+    return {"status": "ok", "service": settings.app_name, "database": "configured"}
+
+@app.post("/api/v1/auth/login")
+def login(payload: LoginIn, db: Session = Depends(get_db)):
+    user = db.scalar(select(User).where(User.username == payload.username, User.active.is_(True)))
+    if not user or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+    return {"access_token": create_access_token(user), "token_type": "bearer", "user": {"username": user.username, "full_name": user.full_name, "role": user.role}}
+
+@app.get("/api/v1/auth/me")
+def me(user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    return {"username": user.username, "full_name": user.full_name, "role": user.role}
+
+@app.get("/api/v1/workflow/stages")
+def workflow_stages(user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    return {"stages": WORKFLOW_STAGES, "note": "Illustrative default pathway. Confirm the applicable AICTE Approval Process Handbook and authority-specific routing before operational use."}
 
 @app.get("/api/v1/applications", response_model=list[ApplicationOut])
-def list_applications(db: Session = Depends(get_db)):
-    return list(db.scalars(select(Application).order_by(Application.submitted_at.desc())).all())
+def list_applications(q: str | None = None, status: str | None = None, stage: str | None = None,
+                      db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    stmt = select(Application).order_by(Application.submitted_at.desc())
+    if q:
+        stmt = stmt.where(Application.institution_name.ilike(f"%{q}%") | Application.application_no.ilike(f"%{q}%") | Application.state.ilike(f"%{q}%"))
+    if status and status != "All": stmt = stmt.where(Application.status == status)
+    if stage and stage != "All": stmt = stmt.where(Application.current_stage == stage)
+    return list(db.scalars(stmt).all())
 
 @app.post("/api/v1/applications", response_model=ApplicationOut, status_code=201)
-def create_application(payload: ApplicationCreate, db: Session = Depends(get_db)):
-    now = datetime.now(timezone.utc)
-    application = Application(
-        application_no=f"AICTE-{now:%Y}-{now:%m%d%H%M%S}",
-        institution_name=payload.institution_name,
-        institution_type=payload.institution_type,
-        state=payload.state,
-        application_type=payload.application_type,
-        current_stage=payload.current_stage,
-        priority=payload.priority,
-        assigned_to=payload.assigned_to,
-        due_date=payload.due_date,
-        notes=payload.notes,
-        status="Pending",
-    )
-    db.add(application)
-    db.flush()
-    db.add(AuditEvent(application_id=application.id, action="APPLICATION_CREATED", actor="prototype-user", details=f"Created {application.application_no}"))
-    db.commit()
-    db.refresh(application)
+def create_application(payload: ApplicationCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer"))):
+    now = utcnow()
+    application = Application(application_no=f"AICTE-{now:%Y%m%d%H%M%S}-{uuid4().hex[:4].upper()}",
+        institution_name=payload.institution_name, institution_type=payload.institution_type, state=payload.state,
+        application_type=payload.application_type, current_stage=payload.current_stage, priority=payload.priority,
+        assigned_to=payload.assigned_to or user.full_name, due_date=payload.due_date, notes=payload.notes, status="Pending")
+    db.add(application); db.flush()
+    db.add(WorkflowEvent(application_id=application.id, from_stage=None, to_stage=application.current_stage, status=application.status, actor=user.full_name, note="Application registered"))
+    audit(db, "APPLICATION_CREATED", user.full_name, application.id, f"Created {application.application_no}")
+    db.commit(); db.refresh(application)
     return application
 
+@app.get("/api/v1/applications/{application_id}", response_model=ApplicationOut)
+def get_application(application_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    item = db.get(Application, application_id)
+    if not item: raise HTTPException(404, "Application not found")
+    return item
+
+@app.patch("/api/v1/applications/{application_id}", response_model=ApplicationOut)
+def update_application(application_id: int, payload: ApplicationUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer"))):
+    item = db.get(Application, application_id)
+    if not item: raise HTTPException(404, "Application not found")
+    changes = payload.model_dump(exclude_unset=True)
+    for key, value in changes.items(): setattr(item, key, value)
+    audit(db, "APPLICATION_UPDATED", user.full_name, item.id, ", ".join(changes.keys()))
+    db.commit(); db.refresh(item)
+    return item
+
+@app.post("/api/v1/applications/{application_id}/transition", response_model=ApplicationOut)
+def transition_application(application_id: int, payload: TransitionIn, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "reviewer"))):
+    item = db.get(Application, application_id)
+    if not item: raise HTTPException(404, "Application not found")
+    if payload.to_stage not in WORKFLOW_STAGES: raise HTTPException(422, "Unknown workflow stage")
+    if payload.status not in {"Pending", "In Review", "Returned", "Completed", "Rejected"}: raise HTTPException(422, "Unknown workflow status")
+    old_stage = item.current_stage
+    item.current_stage = payload.to_stage
+    item.status = "Completed" if payload.to_stage == "Approved / Closed" else ("Rejected" if payload.to_stage == "Rejected" else payload.status)
+    db.add(WorkflowEvent(application_id=item.id, from_stage=old_stage, to_stage=payload.to_stage, status=item.status, note=payload.note, actor=user.full_name))
+    audit(db, "WORKFLOW_TRANSITION", user.full_name, item.id, f"{old_stage} -> {payload.to_stage}; status={item.status}; note={payload.note or ''}")
+    db.commit(); db.refresh(item)
+    return item
+
+@app.get("/api/v1/applications/{application_id}/history")
+def application_history(application_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    if not db.get(Application, application_id): raise HTTPException(404, "Application not found")
+    rows = db.scalars(select(WorkflowEvent).where(WorkflowEvent.application_id == application_id).order_by(WorkflowEvent.created_at.desc())).all()
+    return [{"id": r.id, "from_stage": r.from_stage, "to_stage": r.to_stage, "status": r.status, "note": r.note, "actor": r.actor, "created_at": r.created_at} for r in rows]
+
 @app.get("/api/v1/dashboard/summary")
-def dashboard_summary(db: Session = Depends(get_db)):
+def dashboard_summary(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
     total = db.scalar(select(func.count()).select_from(Application)) or 0
-    pending = db.scalar(select(func.count()).select_from(Application).where(Application.status == "Pending")) or 0
+    pending = db.scalar(select(func.count()).select_from(Application).where(Application.status.in_(["Pending", "In Review", "Returned"]))) or 0
+    overdue = sum(1 for a in db.scalars(select(Application)).all() if a.due_date and safe_dt(a.due_date) < utcnow() and a.status != "Completed")
     stage_rows = db.execute(select(Application.current_stage, func.count()).group_by(Application.current_stage)).all()
-    return {
-        "total_applications": total,
-        "pending_applications": pending,
-        "overdue_applications": db.scalar(select(func.count()).select_from(Application).where(Application.due_date < datetime.now(timezone.utc), Application.status != "Completed")) or 0,
-        "stage_counts": [{"stage": stage, "count": count} for stage, count in stage_rows],
-    }
+    evc_upcoming = db.scalar(select(func.count()).select_from(EVCVisit).where(EVCVisit.status.in_(["Proposed", "Scheduled"]))) or 0
+    compliance_open = db.scalar(select(func.count()).select_from(ComplianceItem).where(ComplianceItem.status != "Verified")) or 0
+    alerts_open = db.scalar(select(func.count()).select_from(Alert).where(Alert.acknowledged.is_(False))) or 0
+    return {"total_applications": total, "pending_applications": pending, "overdue_applications": overdue,
+            "evc_upcoming": evc_upcoming, "compliance_open": compliance_open, "alerts_open": alerts_open,
+            "stage_counts": [{"stage": stage, "count": count} for stage, count in stage_rows]}
+
+@app.get("/api/v1/compliance")
+def list_compliance(application_id: int | None = None, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    stmt = select(ComplianceItem).order_by(ComplianceItem.due_date.asc())
+    if application_id: stmt = stmt.where(ComplianceItem.application_id == application_id)
+    rows = db.scalars(stmt).all()
+    return [{"id": r.id, "application_id": r.application_id, "application_no": (db.get(Application, r.application_id).application_no if db.get(Application, r.application_id) else ""), "institution_name": (db.get(Application, r.application_id).institution_name if db.get(Application, r.application_id) else ""), "title": r.title, "category": r.category, "due_date": r.due_date, "status": r.status, "assigned_to": r.assigned_to, "notes": r.notes} for r in rows]
+
+@app.post("/api/v1/compliance", status_code=201)
+def create_compliance(payload: ComplianceCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer"))):
+    if not db.get(Application, payload.application_id): raise HTTPException(404, "Application not found")
+    item = ComplianceItem(**payload.model_dump(), status="Pending")
+    db.add(item); db.flush(); audit(db, "COMPLIANCE_CREATED", user.full_name, item.application_id, item.title); db.commit(); db.refresh(item)
+    return {"id": item.id, "application_id": item.application_id, "title": item.title, "category": item.category, "due_date": item.due_date, "status": item.status, "assigned_to": item.assigned_to, "notes": item.notes}
+
+@app.patch("/api/v1/compliance/{item_id}")
+def update_compliance(item_id: int, payload: ComplianceUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer"))):
+    item = db.get(ComplianceItem, item_id)
+    if not item: raise HTTPException(404, "Compliance item not found")
+    for key, value in payload.model_dump(exclude_unset=True).items(): setattr(item, key, value)
+    item.updated_at = utcnow()
+    audit(db, "COMPLIANCE_UPDATED", user.full_name, item.application_id, f"{item.title}: {item.status}")
+    db.commit(); db.refresh(item)
+    return {"id": item.id, "application_id": item.application_id, "title": item.title, "category": item.category, "due_date": item.due_date, "status": item.status, "assigned_to": item.assigned_to, "notes": item.notes}
+
+@app.get("/api/v1/undertakings")
+def list_undertakings(application_id: int | None = None, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    stmt = select(Undertaking).order_by(Undertaking.due_date.asc())
+    if application_id: stmt = stmt.where(Undertaking.application_id == application_id)
+    return [{"id": x.id, "application_id": x.application_id, "title": x.title, "submitted": x.submitted, "due_date": x.due_date, "notes": x.notes} for x in db.scalars(stmt).all()]
+
+@app.post("/api/v1/undertakings", status_code=201)
+def create_undertaking(payload: UndertakingCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer"))):
+    if not db.get(Application, payload.application_id): raise HTTPException(404, "Application not found")
+    item = Undertaking(**payload.model_dump()); db.add(item); db.flush()
+    audit(db, "UNDERTAKING_CREATED", user.full_name, item.application_id, item.title); db.commit(); db.refresh(item)
+    return {"id": item.id, "application_id": item.application_id, "title": item.title, "submitted": item.submitted, "due_date": item.due_date, "notes": item.notes}
+
+@app.patch("/api/v1/undertakings/{item_id}")
+def update_undertaking(item_id: int, payload: UndertakingUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer"))):
+    item = db.get(Undertaking, item_id)
+    if not item: raise HTTPException(404, "Undertaking not found")
+    for key, value in payload.model_dump(exclude_unset=True).items(): setattr(item, key, value)
+    audit(db, "UNDERTAKING_UPDATED", user.full_name, item.application_id, item.title); db.commit(); db.refresh(item)
+    return {"id": item.id, "application_id": item.application_id, "title": item.title, "submitted": item.submitted, "due_date": item.due_date, "notes": item.notes}
+
+@app.get("/api/v1/evc")
+def list_evc(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    rows = db.scalars(select(EVCVisit).order_by(EVCVisit.proposed_date.asc())).all()
+    return [{"id": x.id, "application_id": x.application_id, "application_no": db.get(Application, x.application_id).application_no if db.get(Application, x.application_id) else "", "institution_name": db.get(Application, x.application_id).institution_name if db.get(Application, x.application_id) else "", "proposed_date": x.proposed_date, "location": x.location, "panel_members": x.panel_members, "status": x.status, "outcome": x.outcome} for x in rows]
+
+@app.post("/api/v1/evc", status_code=201)
+def create_evc(payload: EVCVisitCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer"))):
+    app_item = db.get(Application, payload.application_id)
+    if not app_item: raise HTTPException(404, "Application not found")
+    item = EVCVisit(**payload.model_dump(), status="Proposed"); db.add(item); db.flush()
+    audit(db, "EVC_VISIT_CREATED", user.full_name, item.application_id, f"Visit proposed for {payload.proposed_date}")
+    db.commit(); db.refresh(item)
+    return {"id": item.id, "application_id": item.application_id, "proposed_date": item.proposed_date, "location": item.location, "panel_members": item.panel_members, "status": item.status, "outcome": item.outcome}
+
+@app.patch("/api/v1/evc/{visit_id}")
+def update_evc(visit_id: int, payload: EVCVisitUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer"))):
+    item = db.get(EVCVisit, visit_id)
+    if not item: raise HTTPException(404, "EVC visit not found")
+    for key, value in payload.model_dump(exclude_unset=True).items(): setattr(item, key, value)
+    audit(db, "EVC_VISIT_UPDATED", user.full_name, item.application_id, f"Status: {item.status}; outcome: {item.outcome or ''}")
+    db.commit(); db.refresh(item)
+    return {"id": item.id, "application_id": item.application_id, "proposed_date": item.proposed_date, "location": item.location, "panel_members": item.panel_members, "status": item.status, "outcome": item.outcome}
+
+@app.get("/api/v1/alerts")
+def list_alerts(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    rows = db.scalars(select(Alert).order_by(Alert.created_at.desc())).all()
+    return [{"id": a.id, "application_id": a.application_id, "application_no": db.get(Application, a.application_id).application_no if a.application_id and db.get(Application, a.application_id) else "", "title": a.title, "message": a.message, "severity": a.severity, "category": a.category, "acknowledged": a.acknowledged, "created_at": a.created_at, "acknowledged_by": a.acknowledged_by} for a in rows]
+
+@app.patch("/api/v1/alerts/{alert_id}/acknowledge")
+def acknowledge_alert(alert_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer"))):
+    item = db.get(Alert, alert_id)
+    if not item: raise HTTPException(404, "Alert not found")
+    item.acknowledged = True; item.acknowledged_by = user.full_name
+    audit(db, "ALERT_ACKNOWLEDGED", user.full_name, item.application_id, item.title)
+    db.commit()
+    return {"id": item.id, "acknowledged": True, "acknowledged_by": item.acknowledged_by}
+
+@app.get("/api/v1/applications/{application_id}/documents")
+def list_documents(application_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    if not db.get(Application, application_id): raise HTTPException(404, "Application not found")
+    rows = db.scalars(select(DocumentRecord).where(DocumentRecord.application_id == application_id).order_by(DocumentRecord.created_at.desc())).all()
+    return [{"id": d.id, "application_id": d.application_id, "original_name": d.original_name, "content_type": d.content_type, "size_bytes": d.size_bytes, "uploaded_by": d.uploaded_by, "created_at": d.created_at} for d in rows]
+
+@app.post("/api/v1/applications/{application_id}/documents", status_code=201)
+async def upload_document(application_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer"))):
+    if not db.get(Application, application_id): raise HTTPException(404, "Application not found")
+    safe_name = Path(file.filename or "document").name
+    allowed = {".pdf", ".png", ".jpg", ".jpeg", ".docx", ".xlsx"}
+    if Path(safe_name).suffix.lower() not in allowed: raise HTTPException(415, "Only PDF, PNG, JPG, DOCX and XLSX files are allowed")
+    content = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
+    if len(content) > settings.max_upload_mb * 1024 * 1024: raise HTTPException(413, f"File exceeds {settings.max_upload_mb} MB limit")
+    storage_key = uuid4().hex + Path(safe_name).suffix.lower()
+    target = Path(settings.upload_dir) / storage_key; target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(content)
+    record = DocumentRecord(application_id=application_id, original_name=safe_name, storage_key=storage_key,
+        content_type=file.content_type or "application/octet-stream", size_bytes=len(content), uploaded_by=user.full_name)
+    db.add(record); db.flush(); audit(db, "DOCUMENT_UPLOADED", user.full_name, application_id, safe_name); db.commit(); db.refresh(record)
+    return {"id": record.id, "application_id": record.application_id, "original_name": record.original_name, "content_type": record.content_type, "size_bytes": record.size_bytes, "uploaded_by": record.uploaded_by, "created_at": record.created_at}
+
+@app.get("/api/v1/documents/{document_id}/download")
+def download_document(document_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    record = db.get(DocumentRecord, document_id)
+    if not record: raise HTTPException(404, "Document not found")
+    path = Path(settings.upload_dir) / record.storage_key
+    if not path.exists(): raise HTTPException(404, "Stored file is missing")
+    return FileResponse(path, media_type=record.content_type, filename=record.original_name)
+
+@app.get("/api/v1/reports/summary")
+def report_summary(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    apps = db.scalars(select(Application)).all()
+    stages = {}
+    for item in apps: stages[item.current_stage] = stages.get(item.current_stage, 0) + 1
+    states = {}
+    for item in apps: states[item.state] = states.get(item.state, 0) + 1
+    return {"generated_at": utcnow(), "total": len(apps), "completed": sum(a.status == "Completed" for a in apps),
+            "open": sum(a.status != "Completed" and a.status != "Rejected" for a in apps),
+            "overdue": sum(bool(a.due_date and safe_dt(a.due_date) < utcnow() and a.status != "Completed") for a in apps),
+            "by_stage": [{"stage": k, "count": v} for k,v in sorted(stages.items())],
+            "by_state": [{"state": k, "count": v} for k,v in sorted(states.items())]}
+
+@app.get("/api/v1/reports/export.csv")
+def export_csv(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    output = io.StringIO(); writer = csv.writer(output)
+    writer.writerow(["Application No", "Institution", "State", "Type", "Stage", "Status", "Priority", "Assignee", "Submitted At", "Due Date"])
+    for a in db.scalars(select(Application).order_by(Application.submitted_at.desc())).all():
+        writer.writerow([a.application_no, a.institution_name, a.state, a.application_type, a.current_stage, a.status, a.priority, a.assigned_to or "", a.submitted_at.isoformat() if a.submitted_at else "", a.due_date.isoformat() if a.due_date else ""])
+    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=aicte-applications-report.csv"})
+
+@app.get("/api/v1/applications/{application_id}/risk")
+def application_risk(application_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    item = db.get(Application, application_id)
+    if not item: raise HTTPException(404, "Application not found")
+    score, factors = 0, []
+    if item.priority == "High": score += 30; factors.append("High priority adds 30 points")
+    elif item.priority == "Normal": score += 10; factors.append("Normal priority adds 10 points")
+    if item.due_date:
+        days = (safe_dt(item.due_date) - utcnow()).total_seconds()/86400
+        if days < 0: score += 45; factors.append("Deadline overdue adds 45 points")
+        elif days <= 3: score += 30; factors.append("Deadline within 3 days adds 30 points")
+        elif days <= 7: score += 15; factors.append("Deadline within 7 days adds 15 points")
+    open_compliance = db.scalar(select(func.count()).select_from(ComplianceItem).where(ComplianceItem.application_id == item.id, ComplianceItem.status != "Verified")) or 0
+    if open_compliance: score += min(25, open_compliance*10); factors.append(f"{open_compliance} compliance item(s) not verified")
+    score = min(100, score)
+    return {"application_id": item.id, "application_no": item.application_no, "score": score,
+            "band": "High" if score >= 60 else ("Medium" if score >= 30 else "Low"),
+            "factors": factors, "disclaimer": "Explainable triage aid only; not an AICTE decision or statutory finding."}
+
+@app.get("/api/v1/audit")
+def list_audit(limit: int = 100, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "auditor"))):
+    rows = db.scalars(select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(min(max(limit,1),500))).all()
+    return [{"id": x.id, "application_id": x.application_id, "action": x.action, "actor": x.actor, "details": x.details, "created_at": x.created_at} for x in rows]
