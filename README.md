@@ -74,7 +74,7 @@ python -m pytest -q
 From `frontend`, run:
 
 ```powershell
-npm ci
+npm install
 npm run build
 ```
 
