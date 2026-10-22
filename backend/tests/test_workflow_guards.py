@@ -136,3 +136,44 @@ def test_escalation_policy_exposes_tiered_follow_up_rules():
         levels = response.json()["levels"]
         assert [item["level"] for item in levels] == [1, 2, 3]
         assert "prototype defaults" in response.json()["note"]
+
+
+def test_document_checklist_template_apply_and_pre_scrutiny_summary():
+    with TestClient(app) as client:
+        headers = auth(client)
+        app_response = client.post("/api/v1/applications", headers=headers, json={
+            "institution_name": "Checklist Test Institution", "application_type": "Checklist Test Type",
+            "current_stage": "Application Intake", "priority": "Normal"
+        })
+        assert app_response.status_code == 201
+        app_id = app_response.json()["id"]
+        template = client.put("/api/v1/document-checklists/templates", headers=headers, json={
+            "application_type": "Checklist Test Type",
+            "items": [
+                {"key": "form-a", "label": "Application form", "required": True},
+                {"key": "optional-b", "label": "Supporting note", "required": False}
+            ]
+        })
+        assert template.status_code == 200
+        applied = client.post(f"/api/v1/applications/{app_id}/document-checklist/apply", headers=headers)
+        assert applied.status_code == 200
+        assert applied.json()["items_added"] == 2
+        checklist = client.get(f"/api/v1/applications/{app_id}/document-checklist", headers=headers)
+        assert checklist.status_code == 200
+        assert checklist.json()["summary"]["missing_required"] == 1
+        assert checklist.json()["summary"]["ready_for_human_review"] is False
+        # Applying the same template twice must not duplicate existing checklist rows.
+        again = client.post(f"/api/v1/applications/{app_id}/document-checklist/apply", headers=headers)
+        assert again.status_code == 200
+        assert again.json()["items_added"] == 0
+
+def test_document_checklist_template_is_admin_only():
+    with TestClient(app) as client:
+        login_response = client.post("/api/v1/auth/login", json={"username": "officer@demo.local", "password": "Demo@12345"})
+        assert login_response.status_code == 200
+        headers = {"Authorization": "Bearer " + login_response.json()["access_token"]}
+        result = client.put("/api/v1/document-checklists/templates", headers=headers, json={
+            "application_type": "Restricted Checklist Type",
+            "items": [{"key": "one", "label": "Document one", "required": True}]
+        })
+        assert result.status_code == 403
