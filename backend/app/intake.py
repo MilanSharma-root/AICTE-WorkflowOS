@@ -390,14 +390,15 @@ async def replace_college_document(document_id: int, file: UploadFile = File(...
     _audit(db, "COLLEGE_DOCUMENT_REPLACED", profile.institution_name, profile.application_id, f"Corrected document: {check.slot_name if check else safe_name}")
     if all_issues:
         alert = Alert(application_id=profile.application_id, title="Document correction required",
-                      message=f"{len(all_issues)} preliminary document issue(s) remain. " +
-                              ("A correction email was sent." if os.getenv("SMTP_HOST") and os.getenv("SMTP_FROM") else "Email delivery is not configured; follow up through an approved channel."),
+                      message=f"{len(all_issues)} preliminary document issue(s) remain; checking email delivery.",
                       severity="High", category="Document Quality")
         db.add(alert)
         try:
-            if _send_correction_email(profile.contact_email, db.get(Application, profile.application_id).application_no,
-                                      profile.institution_name, all_issues):
+            email_sent = _send_correction_email(profile.contact_email, db.get(Application, profile.application_id).application_no,
+                                                profile.institution_name, all_issues)
+            if email_sent:
                 _audit(db, "CORRECTION_EMAIL_SENT", "system", profile.application_id, f"Correction notice sent to {profile.contact_email}")
+                alert.message = f"{len(all_issues)} preliminary document issue(s) remain. A correction email was sent."
             else:
                 alert.message = f"{len(all_issues)} preliminary document issue(s) remain. Email delivery is not configured; follow up through an approved channel."
         except Exception as exc:
