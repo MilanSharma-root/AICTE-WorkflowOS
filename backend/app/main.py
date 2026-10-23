@@ -136,57 +136,22 @@ def audit(db: Session, action: str, actor: str, application_id: int | None = Non
     db.add(AuditEvent(application_id=application_id, action=action, actor=actor, details=details))
 
 def seed_demo_data(db: Session):
-    if not db.scalar(select(func.count()).select_from(User)):
-        demo_users = [
-            ("admin@demo.local", "Demo Administrator", "admin"),
-            ("officer@demo.local", "Case Officer", "officer"),
-            ("reviewer@demo.local", "Scrutiny Reviewer", "reviewer"),
-            ("auditor@demo.local", "Audit Viewer", "auditor"),
-            ("scrutiny@demo.local", "Scrutiny Officer", "scrutiny_officer"),
-            ("evc@demo.local", "EVC Officer", "evc_officer"),
-            ("sac.shc@demo.local", "SAC/SHC Officer", "sac_shc_officer"),
-            ("compliance@demo.local", "Compliance Officer", "compliance_officer"),
-            ("final.approval@demo.local", "Final Approval Officer", "final_approval_officer"),
-        ]
-        for username, full_name, role in demo_users:
-            db.add(User(username=username, full_name=full_name, role=role, password_hash=hash_password("Demo@12345")))
-    if db.scalar(select(func.count()).select_from(Application)):
-        db.commit()
+    """Create demo login accounts only; application records must come from actual submissions."""
+    if db.scalar(select(func.count()).select_from(User)):
         return
-    now = utcnow()
-    sample = [
-        ("North Valley Institute of Technology", "Uttar Pradesh", "Extension of Approval", "Scrutiny", "High", 2),
-        ("Saraswati College of Engineering", "Rajasthan", "New Institution", "EVC Scheduling", "High", 5),
-        ("Eastern Institute of Management", "Bihar", "Increase in Intake", "SAC/SHC Review", "Normal", 8),
-        ("Riverbend Technical Campus", "Madhya Pradesh", "Extension of Approval", "Compliance", "Normal", -2),
-        ("Central Polytechnic Institute", "Uttarakhand", "New Course", "Application Intake", "Low", 12),
-        ("Pioneer School of Applied Sciences", "Haryana", "New Institution", "Re-scrutiny", "High", 1),
+    demo_users = [
+        ("admin@demo.local", "Demo Administrator", "admin"),
+        ("officer@demo.local", "Case Officer", "officer"),
+        ("reviewer@demo.local", "Scrutiny Reviewer", "reviewer"),
+        ("auditor@demo.local", "Audit Viewer", "auditor"),
+        ("scrutiny@demo.local", "Scrutiny Officer", "scrutiny_officer"),
+        ("evc@demo.local", "EVC Officer", "evc_officer"),
+        ("sac.shc@demo.local", "SAC/SHC Officer", "sac_shc_officer"),
+        ("compliance@demo.local", "Compliance Officer", "compliance_officer"),
+        ("final.approval@demo.local", "Final Approval Officer", "final_approval_officer"),
     ]
-    for i, (name, state, app_type, stage, priority, days) in enumerate(sample, start=1):
-        item = Application(
-            application_no=f"AICTE-{now.year}-{i:06d}", institution_name=name, state=state,
-            application_type=app_type, current_stage=stage,
-            status="Completed" if stage == "Approved / Closed" else ("In Review" if stage in {"EVC Scheduling", "SAC/SHC Review", "Re-scrutiny"} else "Pending"),
-            priority=priority, assigned_to=["R. Mehta", "A. Sharma", "S. Rao", "K. Singh", "P. Nair", "M. Verma"][i-1],
-            submitted_at=now-timedelta(days=20+i*3), due_date=now+timedelta(days=days),
-            notes="Synthetic demonstration record; replace with verified institutional data."
-        )
-        db.add(item)
-        db.flush()
-        db.add(WorkflowEvent(application_id=item.id, from_stage=None, to_stage=stage, status=item.status, actor="system", note="Seeded synthetic demo record"))
-        db.add(AuditEvent(application_id=item.id, action="DEMO_RECORD_CREATED", actor="system", details="Synthetic seed data"))
-        if i in (1, 4, 5):
-            db.add(ComplianceItem(application_id=item.id, title=["Scrutiny evidence verification", "Lease deed validity check", "Faculty undertaking"][ [1,4,5].index(i) ],
-                                  category="Document validity" if i == 4 else "Undertaking",
-                                  due_date=now+timedelta(days=days), status="Pending", assigned_to=item.assigned_to,
-                                  notes="Demo checklist item; confirm official requirements."))
-        if i == 2:
-            db.add(EVCVisit(application_id=item.id, proposed_date=now+timedelta(days=7), location="Institution campus",
-                            panel_members="Panel assignment pending", status="Proposed"))
-        if days <= 2:
-            db.add(Alert(application_id=item.id, title="Deadline approaching", message=f"{item.institution_name}: action due in {days} day(s).", severity="High", category="Deadline"))
-        if days < 0:
-            db.add(Alert(application_id=item.id, title="Overdue workflow item", message=f"{item.institution_name}: target date has passed; review and escalate if required.", severity="Critical", category="Escalation"))
+    for username, full_name, role in demo_users:
+        db.add(User(username=username, full_name=full_name, role=role, password_hash=hash_password("Demo@12345")))
     db.commit()
 
 @asynccontextmanager
@@ -423,10 +388,28 @@ def transition_application(application_id: int, payload: TransitionIn, db: Sessi
         "EVC Scheduling": "evc_officer", "EVC Visit": "evc_officer",
         "SAC/SHC Review": "sac_shc_officer", "Compliance": "compliance_officer",
     }
+    stages = stages_for_application(db, item.application_type)
+    if payload.status == "Stage Completed":
+        if payload.to_stage != item.current_stage:
+            raise HTTPException(422, "Select the current stage to complete it; the system will route it to the next stage.")
+        operational_for_completion = [stage for stage in stages if stage not in {"Re-scrutiny", "Returned to Institution", "Approved / Closed", "Rejected"}]
+        if item.current_stage == "Returned to Institution":
+            next_stage = "Re-scrutiny" if "Re-scrutiny" in stages else ("Scrutiny" if "Scrutiny" in operational_for_completion else None)
+        elif item.current_stage == "Re-scrutiny":
+            scrutiny_index = operational_for_completion.index("Scrutiny") if "Scrutiny" in operational_for_completion else -1
+            next_stage = operational_for_completion[scrutiny_index + 1] if 0 <= scrutiny_index + 1 < len(operational_for_completion) else None
+        elif item.current_stage in operational_for_completion:
+            current_index = operational_for_completion.index(item.current_stage)
+            next_stage = operational_for_completion[current_index + 1] if current_index + 1 < len(operational_for_completion) else ("Approved / Closed" if "Approved / Closed" in stages else None)
+        else:
+            next_stage = None
+        if not next_stage:
+            raise HTTPException(422, "No next stage is configured. Ask an administrator to review the workflow route.")
+        payload.to_stage = next_stage
+        payload.status = "Completed" if next_stage == "Approved / Closed" else "In Review"
     required_role = "final_approval_officer" if payload.to_stage in {"Approved / Closed", "Rejected"} else stage_roles.get(item.current_stage)
     if user.role not in {"admin", "reviewer"} and user.role != required_role:
-        raise HTTPException(403, f"This transition requires the {required_role or 'authorised stage'} role.")
-    stages = stages_for_application(db, item.application_type)
+        raise HTTPException(403, "This transition is not permitted for your role.")
     if payload.to_stage not in stages:
         raise HTTPException(422, "Unknown workflow stage")
     if item.current_stage not in stages:
