@@ -331,6 +331,15 @@ def run_workflow_automation(db: Session = Depends(get_db), user: User = Depends(
 def list_applications(q: str | None = None, status: str | None = None, stage: str | None = None,
                       db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
     stmt = select(Application).order_by(Application.submitted_at.desc())
+    role_stages = {
+        "scrutiny_officer": {"Application Intake", "Scrutiny", "Re-scrutiny", "Returned to Institution"},
+        "evc_officer": {"EVC Scheduling", "EVC Visit"},
+        "sac_shc_officer": {"SAC/SHC Review"},
+        "compliance_officer": {"Compliance"},
+        "final_approval_officer": {"Compliance"},
+    }
+    if user.role in role_stages:
+        stmt = stmt.where(Application.current_stage.in_(role_stages[user.role]))
     if q:
         stmt = stmt.where(Application.institution_name.ilike(f"%{q}%") | Application.application_no.ilike(f"%{q}%") | Application.state.ilike(f"%{q}%"))
     if status and status != "All": stmt = stmt.where(Application.status == status)
