@@ -253,3 +253,16 @@ def get_officer_queue(db: Session = Depends(get_db), user: User = Depends(curren
         "application_type": row.application_type, "current_stage": row.current_stage, "status": row.status,
         "priority": row.priority, "state": row.state, "submitted_at": row.submitted_at,
     } for row in rows]}
+
+
+@router.get("/api/v1/applications/{application_id}/document-quality")
+def get_application_document_quality(application_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    if user.role not in {"admin", "officer", "reviewer", "auditor", "scrutiny_officer", "evc_officer", "sac_shc_officer", "compliance_officer", "final_approval_officer"}:
+        raise HTTPException(403, "Authorised AICTE staff role required")
+    if not db.get(Application, application_id):
+        raise HTTPException(404, "Application not found")
+    checks = db.scalars(select(DocumentQualityCheck).where(DocumentQualityCheck.application_id == application_id).order_by(DocumentQualityCheck.id)).all()
+    return [{
+        "document_id": check.document_id, "slot": check.slot_name, "status": check.status,
+        "findings": json.loads(check.findings_json), "checked_at": check.checked_at,
+    } for check in checks]
