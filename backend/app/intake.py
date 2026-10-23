@@ -70,34 +70,44 @@ def _analyse_document(slot_name: str, filename: str, content: bytes, institution
 
 
 def _send_correction_email(recipient: str, application_no: str, institution_name: str, issues: list[str]) -> bool:
+    """Send a college correction email; return False when SMTP is not configured."""
     host = os.getenv("SMTP_HOST", "").strip()
     sender = os.getenv("SMTP_FROM", "").strip()
     if not host or not sender:
         return False
-    message = EmailMessage()
-    message["Subject"] = f"Action required: documents need correction for {application_no}"
-    message["From"] = sender
-    message["To"] = recipient
-    issue_lines = "\n".join(f"- {issue}" for issue in issues)
-    message.set_content(
-        f"Dear {institution_name},\n\n"
-        f"Automated preliminary checks found possible issues in your AICTE WorkflowOS submission ({application_no}):\n"
-        f"{issue_lines}\n\n"
-        "Please sign in to the College Portal and upload corrected documents. These checks are preliminary and do not constitute an official compliance decision.\n"
-    )
+
     port = int(os.getenv("SMTP_PORT", "587"))
     username = os.getenv("SMTP_USERNAME", "").strip()
     password = os.getenv("SMTP_PASSWORD", "")
     use_ssl = os.getenv("SMTP_USE_SSL", "").lower() in {"1", "true", "yes"}
+    use_tls = os.getenv("SMTP_USE_TLS", "true").lower() in {"1", "true", "yes"}
+    if use_ssl and use_tls:
+        raise ValueError("Choose either SMTP_USE_SSL=true or SMTP_USE_TLS=true, not both.")
+    if bool(username) != bool(password):
+        raise ValueError("SMTP_USERNAME and SMTP_PASSWORD must both be set when SMTP authentication is used.")
+    if not 1 <= port <= 65535:
+        raise ValueError("SMTP_PORT must be between 1 and 65535.")
+
+    message = EmailMessage()
+    message["Subject"] = f"Action required: documents need correction for {application_no}"
+    message["From"] = sender
+    message["To"] = recipient
+    issue_lines = "\\n".join(f"- {issue}" for issue in issues)
+    message.set_content(
+        f"Dear {institution_name},\\n\\n"
+        f"Automated preliminary checks found possible issues in your AICTE WorkflowOS submission ({application_no}):\\n"
+        f"{issue_lines}\\n\\n"
+        "Please sign in to the College Portal and upload corrected documents. These checks are preliminary and do not constitute an official compliance decision.\\n"
+    )
     if use_ssl:
-        with smtplib.SMTP_SSL(host, port, timeout=10) as server:
+        with smtplib.SMTP_SSL(host, port, timeout=20) as server:
             if username:
                 server.login(username, password)
             server.send_message(message)
     else:
-        with smtplib.SMTP(host, port, timeout=10) as server:
+        with smtplib.SMTP(host, port, timeout=20) as server:
             server.ehlo()
-            if os.getenv("SMTP_USE_TLS", "true").lower() in {"1", "true", "yes"}:
+            if use_tls:
                 server.starttls()
                 server.ehlo()
             if username:
