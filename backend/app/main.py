@@ -533,8 +533,10 @@ def list_compliance(application_id: int | None = None, db: Session = Depends(get
     return [{"id": r.id, "application_id": r.application_id, "application_no": (db.get(Application, r.application_id).application_no if db.get(Application, r.application_id) else ""), "institution_name": (db.get(Application, r.application_id).institution_name if db.get(Application, r.application_id) else ""), "title": r.title, "category": r.category, "due_date": r.due_date, "status": r.status, "assigned_to": r.assigned_to, "notes": r.notes} for r in rows]
 
 @app.post("/api/v1/compliance", status_code=201)
-def create_compliance(payload: ComplianceCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer"))):
-    if not db.get(Application, payload.application_id): raise HTTPException(404, "Application not found")
+def create_compliance(payload: ComplianceCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "compliance_officer"))):
+    app_item = db.get(Application, payload.application_id)
+    if not app_item: raise HTTPException(404, "Application not found")
+    if user.role == "compliance_officer" and app_item.current_stage != "Compliance": raise HTTPException(403, "Compliance officers can create tasks only for applications in Compliance.")
     item = ComplianceItem(**payload.model_dump(), status="Pending")
     db.add(item); db.flush(); audit(db, "COMPLIANCE_CREATED", user.full_name, item.application_id, item.title); db.commit(); db.refresh(item)
     return {"id": item.id, "application_id": item.application_id, "title": item.title, "category": item.category, "due_date": item.due_date, "status": item.status, "assigned_to": item.assigned_to, "notes": item.notes}
@@ -543,6 +545,8 @@ def create_compliance(payload: ComplianceCreate, db: Session = Depends(get_db), 
 def update_compliance(item_id: int, payload: ComplianceUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer", "compliance_officer"))):
     item = db.get(ComplianceItem, item_id)
     if not item: raise HTTPException(404, "Compliance item not found")
+    app_item = db.get(Application, item.application_id)
+    if user.role == "compliance_officer" and (not app_item or app_item.current_stage != "Compliance"): raise HTTPException(403, "Compliance officers can update items only while the application is in Compliance.")
     for key, value in payload.model_dump(exclude_unset=True).items(): setattr(item, key, value)
     item.updated_at = utcnow()
     audit(db, "COMPLIANCE_UPDATED", user.full_name, item.application_id, f"{item.title}: {item.status}")
@@ -564,10 +568,11 @@ def list_document_validity(application_id: int | None = None, db: Session = Depe
     } for x in rows]
 
 @app.post("/api/v1/document-validity", status_code=201)
-def create_document_validity(payload: DocumentValidityCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer"))):
+def create_document_validity(payload: DocumentValidityCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "compliance_officer"))):
     application = db.get(Application, payload.application_id)
     if not application:
         raise HTTPException(404, "Application not found")
+    if user.role == "compliance_officer" and application.current_stage != "Compliance": raise HTTPException(403, "Compliance officers can add validity records only during Compliance.")
     if payload.document_id is not None:
         document = db.get(DocumentRecord, payload.document_id)
         if not document or document.application_id != application.id:
@@ -581,10 +586,12 @@ def create_document_validity(payload: DocumentValidityCreate, db: Session = Depe
     return {"id": item.id, "application_id": item.application_id, "document_name": item.document_name, "category": item.category, "document_id": item.document_id, "issued_on": item.issued_on, "expiry_date": item.expiry_date, "renewal_due_date": item.renewal_due_date, "status": item.status, "notes": item.notes, "created_by": item.created_by, "updated_by": item.updated_by, "created_at": item.created_at, "updated_at": item.updated_at}
 
 @app.patch("/api/v1/document-validity/{item_id}")
-def update_document_validity(item_id: int, payload: DocumentValidityUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer"))):
+def update_document_validity(item_id: int, payload: DocumentValidityUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer", "compliance_officer"))):
     item = db.get(DocumentValidity, item_id)
     if not item:
         raise HTTPException(404, "Document validity record not found")
+    app_item = db.get(Application, item.application_id)
+    if user.role == "compliance_officer" and (not app_item or app_item.current_stage != "Compliance"): raise HTTPException(403, "Compliance officers can update validity records only during Compliance.")
     changes = payload.model_dump(exclude_unset=True)
     if "status" in changes and changes["status"] not in {"Active", "Renewal Due", "Under Verification", "Expired", "Renewed", "Not Applicable"}:
         raise HTTPException(422, "Unsupported document validity status")
@@ -611,16 +618,20 @@ def list_undertakings(application_id: int | None = None, db: Session = Depends(g
     return [{"id": x.id, "application_id": x.application_id, "title": x.title, "submitted": x.submitted, "due_date": x.due_date, "notes": x.notes} for x in db.scalars(stmt).all()]
 
 @app.post("/api/v1/undertakings", status_code=201)
-def create_undertaking(payload: UndertakingCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer"))):
-    if not db.get(Application, payload.application_id): raise HTTPException(404, "Application not found")
+def create_undertaking(payload: UndertakingCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "compliance_officer"))):
+    app_item = db.get(Application, payload.application_id)
+    if not app_item: raise HTTPException(404, "Application not found")
+    if user.role == "compliance_officer" and app_item.current_stage != "Compliance": raise HTTPException(403, "Compliance officers can create undertakings only during Compliance.")
     item = Undertaking(**payload.model_dump()); db.add(item); db.flush()
     audit(db, "UNDERTAKING_CREATED", user.full_name, item.application_id, item.title); db.commit(); db.refresh(item)
     return {"id": item.id, "application_id": item.application_id, "title": item.title, "submitted": item.submitted, "due_date": item.due_date, "notes": item.notes}
 
 @app.patch("/api/v1/undertakings/{item_id}")
-def update_undertaking(item_id: int, payload: UndertakingUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer"))):
+def update_undertaking(item_id: int, payload: UndertakingUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "compliance_officer"))):
     item = db.get(Undertaking, item_id)
     if not item: raise HTTPException(404, "Undertaking not found")
+    app_item = db.get(Application, item.application_id)
+    if user.role == "compliance_officer" and (not app_item or app_item.current_stage != "Compliance"): raise HTTPException(403, "Compliance officers can update undertakings only during Compliance.")
     for key, value in payload.model_dump(exclude_unset=True).items(): setattr(item, key, value)
     audit(db, "UNDERTAKING_UPDATED", user.full_name, item.application_id, item.title); db.commit(); db.refresh(item)
     return {"id": item.id, "application_id": item.application_id, "title": item.title, "submitted": item.submitted, "due_date": item.due_date, "notes": item.notes}
@@ -631,9 +642,10 @@ def list_evc(db: Session = Depends(get_db), user: User = Depends(require_roles(*
     return [{"id": x.id, "application_id": x.application_id, "application_no": db.get(Application, x.application_id).application_no if db.get(Application, x.application_id) else "", "institution_name": db.get(Application, x.application_id).institution_name if db.get(Application, x.application_id) else "", "proposed_date": x.proposed_date, "location": x.location, "panel_members": x.panel_members, "status": x.status, "outcome": x.outcome} for x in rows]
 
 @app.post("/api/v1/evc", status_code=201)
-def create_evc(payload: EVCVisitCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer"))):
+def create_evc(payload: EVCVisitCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "evc_officer"))):
     app_item = db.get(Application, payload.application_id)
     if not app_item: raise HTTPException(404, "Application not found")
+    if user.role == "evc_officer" and app_item.current_stage not in {"EVC Scheduling", "EVC Visit"}: raise HTTPException(403, "EVC officers can schedule visits only for applications in the EVC stages.")
     item = EVCVisit(**payload.model_dump(), status="Proposed"); db.add(item); db.flush()
     audit(db, "EVC_VISIT_CREATED", user.full_name, item.application_id, f"Visit proposed for {payload.proposed_date}")
     db.commit(); db.refresh(item)
@@ -643,6 +655,8 @@ def create_evc(payload: EVCVisitCreate, db: Session = Depends(get_db), user: Use
 def update_evc(visit_id: int, payload: EVCVisitUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer", "evc_officer"))):
     item = db.get(EVCVisit, visit_id)
     if not item: raise HTTPException(404, "EVC visit not found")
+    app_item = db.get(Application, item.application_id)
+    if user.role == "evc_officer" and (not app_item or app_item.current_stage not in {"EVC Scheduling", "EVC Visit"}): raise HTTPException(403, "EVC officers can update visits only while the application is in an EVC stage.")
     for key, value in payload.model_dump(exclude_unset=True).items(): setattr(item, key, value)
     audit(db, "EVC_VISIT_UPDATED", user.full_name, item.application_id, f"Status: {item.status}; outcome: {item.outcome or ''}")
     db.commit(); db.refresh(item)
@@ -730,6 +744,8 @@ def update_document_check(check_id: int, payload: DocumentCheckUpdate, db: Sessi
     check = db.get(ApplicationDocumentCheck, check_id)
     if not check:
         raise HTTPException(404, "Checklist item not found")
+    app_item = db.get(Application, check.application_id)
+    if user.role == "scrutiny_officer" and (not app_item or app_item.current_stage not in {"Application Intake", "Scrutiny", "Re-scrutiny", "Returned to Institution"}): raise HTTPException(403, "Scrutiny officers can update intake checklist items only during scrutiny stages.")
     if payload.status not in {"Missing", "Uploaded", "Verified", "Rejected", "Not Applicable"}:
         raise HTTPException(422, "Invalid checklist status")
     if payload.document_id is not None:
