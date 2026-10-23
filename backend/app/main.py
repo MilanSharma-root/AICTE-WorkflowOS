@@ -17,6 +17,7 @@ from app.schemas import (ApplicationCreate, ApplicationOut, ApplicationUpdate, C
                          ComplianceUpdate, EVCVisitCreate, EVCVisitUpdate, LoginIn,
                          TransitionIn, UndertakingCreate, UndertakingUpdate, WorkflowConfigUpdate, ApplicationWorkflowRouteUpdate, DocumentChecklistTemplateUpdate, DocumentCheckUpdate, DocumentValidityCreate, DocumentValidityUpdate)
 from app.security import create_access_token, hash_password, require_roles, verify_password
+from app.intake import router as intake_router
 
 WORKFLOW_STAGES = [
     "Application Intake", "Scrutiny", "Re-scrutiny", "EVC Scheduling",
@@ -122,7 +123,7 @@ async def deadline_scheduler():
         except Exception:
             # Keep the API alive; the next interval will retry.
             continue
-ALLOWED_ROLES = {"admin", "officer", "reviewer", "auditor"}
+ALLOWED_ROLES = {"admin", "officer", "reviewer", "auditor", "scrutiny_officer", "evc_officer", "sac_shc_officer", "compliance_officer", "final_approval_officer"}
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -141,6 +142,11 @@ def seed_demo_data(db: Session):
             ("officer@demo.local", "Case Officer", "officer"),
             ("reviewer@demo.local", "Scrutiny Reviewer", "reviewer"),
             ("auditor@demo.local", "Audit Viewer", "auditor"),
+            ("scrutiny@demo.local", "Scrutiny Officer", "scrutiny_officer"),
+            ("evc@demo.local", "EVC Officer", "evc_officer"),
+            ("sac.shc@demo.local", "SAC/SHC Officer", "sac_shc_officer"),
+            ("compliance@demo.local", "Compliance Officer", "compliance_officer"),
+            ("final.approval@demo.local", "Final Approval Officer", "final_approval_officer"),
         ]
         for username, full_name, role in demo_users:
             db.add(User(username=username, full_name=full_name, role=role, password_hash=hash_password("Demo@12345")))
@@ -211,6 +217,8 @@ if settings.app_env.strip().lower() not in {"prod", "production"}:
     cors_origins = list(dict.fromkeys([*cors_origins, "http://localhost:5173", "http://127.0.0.1:5173"]))
 app.add_middleware(CORSMiddleware, allow_origins=cors_origins, allow_credentials=True, allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allow_headers=["Authorization", "Content-Type"])
 
+app.include_router(intake_router)
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": settings.app_name, "database": "configured"}
@@ -223,7 +231,7 @@ def login(payload: LoginIn, db: Session = Depends(get_db)):
     return {"access_token": create_access_token(user), "token_type": "bearer", "user": {"username": user.username, "full_name": user.full_name, "role": user.role}}
 
 @app.get("/api/v1/auth/me")
-def me(user: User = Depends(require_roles(*ALLOWED_ROLES))):
+def me(user: User = Depends(require_roles(*ALLOWED_ROLES, "college"))):
     return {"username": user.username, "full_name": user.full_name, "role": user.role}
 
 @app.get("/api/v1/workflow/stages")
@@ -407,9 +415,17 @@ def update_application(application_id: int, payload: ApplicationUpdate, db: Sess
     return item
 
 @app.post("/api/v1/applications/{application_id}/transition", response_model=ApplicationOut)
-def transition_application(application_id: int, payload: TransitionIn, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "reviewer"))):
+def transition_application(application_id: int, payload: TransitionIn, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "reviewer", "scrutiny_officer", "evc_officer", "sac_shc_officer", "compliance_officer", "final_approval_officer"))):
     item = db.get(Application, application_id)
     if not item: raise HTTPException(404, "Application not found")
+    stage_roles = {
+        "Application Intake": "scrutiny_officer", "Scrutiny": "scrutiny_officer", "Re-scrutiny": "scrutiny_officer",
+        "EVC Scheduling": "evc_officer", "EVC Visit": "evc_officer",
+        "SAC/SHC Review": "sac_shc_officer", "Compliance": "compliance_officer",
+    }
+    required_role = "final_approval_officer" if payload.to_stage in {"Approved / Closed", "Rejected"} else stage_roles.get(item.current_stage)
+    if user.role not in {"admin", "reviewer"} and user.role != required_role:
+        raise HTTPException(403, f"This transition requires the {required_role or 'authorised stage'} role.")
     stages = stages_for_application(db, item.application_type)
     if payload.to_stage not in stages:
         raise HTTPException(422, "Unknown workflow stage")
@@ -510,7 +526,7 @@ def create_compliance(payload: ComplianceCreate, db: Session = Depends(get_db), 
     return {"id": item.id, "application_id": item.application_id, "title": item.title, "category": item.category, "due_date": item.due_date, "status": item.status, "assigned_to": item.assigned_to, "notes": item.notes}
 
 @app.patch("/api/v1/compliance/{item_id}")
-def update_compliance(item_id: int, payload: ComplianceUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer"))):
+def update_compliance(item_id: int, payload: ComplianceUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer", "compliance_officer"))):
     item = db.get(ComplianceItem, item_id)
     if not item: raise HTTPException(404, "Compliance item not found")
     for key, value in payload.model_dump(exclude_unset=True).items(): setattr(item, key, value)
@@ -610,7 +626,7 @@ def create_evc(payload: EVCVisitCreate, db: Session = Depends(get_db), user: Use
     return {"id": item.id, "application_id": item.application_id, "proposed_date": item.proposed_date, "location": item.location, "panel_members": item.panel_members, "status": item.status, "outcome": item.outcome}
 
 @app.patch("/api/v1/evc/{visit_id}")
-def update_evc(visit_id: int, payload: EVCVisitUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer"))):
+def update_evc(visit_id: int, payload: EVCVisitUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer", "evc_officer"))):
     item = db.get(EVCVisit, visit_id)
     if not item: raise HTTPException(404, "EVC visit not found")
     for key, value in payload.model_dump(exclude_unset=True).items(): setattr(item, key, value)
@@ -696,7 +712,7 @@ def get_application_document_checklist(application_id: int, db: Session = Depend
             "note": "Readiness is a checklist signal only, not a legal compliance finding or approval decision."}
 
 @app.patch("/api/v1/document-checklist-items/{check_id}")
-def update_document_check(check_id: int, payload: DocumentCheckUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer"))):
+def update_document_check(check_id: int, payload: DocumentCheckUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer", "scrutiny_officer"))):
     check = db.get(ApplicationDocumentCheck, check_id)
     if not check:
         raise HTTPException(404, "Checklist item not found")
