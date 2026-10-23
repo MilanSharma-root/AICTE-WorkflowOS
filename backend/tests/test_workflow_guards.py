@@ -350,3 +350,31 @@ def test_production_configuration_rejects_default_or_weak_secret():
         cors_origins="https://workflow.example.org",
     )
     assert secure.app_env == "production"
+
+
+def test_automation_routes_unassigned_case_to_authorised_stage_owner():
+    with TestClient(app) as client:
+        created = client.post("/api/v1/public/applications", json={
+            "institution_name": "Automation Routing Integration Test",
+            "application_type": "Extension of Approval",
+            "current_stage": "Application Intake",
+            "priority": "Normal",
+            "state": "Uttar Pradesh",
+        })
+        assert created.status_code == 201
+        app_id = created.json()["id"]
+        assert created.json()["assigned_to"] is None
+
+        admin_headers = auth(client)
+        run = client.post("/api/v1/automation/run", headers=admin_headers, json={})
+        assert run.status_code == 200
+        updated = client.get(f"/api/v1/applications/{app_id}", headers=admin_headers)
+        assert updated.status_code == 200
+        assert updated.json()["assigned_to"] == "Scrutiny Officer"
+
+        history = client.get(f"/api/v1/applications/{app_id}/history", headers=admin_headers)
+        assert history.status_code == 200
+        # Assignment is auditable even though no statutory workflow stage is advanced.
+        audit_rows = client.get("/api/v1/audit?limit=500", headers=admin_headers)
+        assert audit_rows.status_code == 200
+        assert any(row["application_id"] == app_id and row["action"] == "AUTOMATION_CASE_ASSIGNED" for row in audit_rows.json())
