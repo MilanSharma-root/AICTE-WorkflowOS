@@ -407,7 +407,7 @@ def transition_application(application_id: int, payload: TransitionIn, db: Sessi
     if payload.status == "Stage Completed":
         if payload.to_stage != item.current_stage:
             raise HTTPException(422, "Select the current stage to complete it; the system will route it to the next stage.")
-        if item.current_stage in {"Application Intake", "Scrutiny", "Re-scrutiny"}:
+        if item.current_stage in {"Application Intake", "Scrutiny", "Re-scrutiny", "Returned to Institution"}:
             quality_issues = db.scalars(select(DocumentQualityCheck).where(
                 DocumentQualityCheck.application_id == item.id,
                 DocumentQualityCheck.status == "Needs Correction"
