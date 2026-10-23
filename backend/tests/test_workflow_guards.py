@@ -378,3 +378,33 @@ def test_automation_routes_unassigned_case_to_authorised_stage_owner():
         audit_rows = client.get("/api/v1/audit?limit=500", headers=admin_headers)
         assert audit_rows.status_code == 200
         assert any(row["application_id"] == app_id and row["action"] == "AUTOMATION_CASE_ASSIGNED" for row in audit_rows.json())
+
+def test_authorised_transition_automatically_hands_case_to_next_stage_owner():
+    with TestClient(app) as client:
+        headers = auth(client)
+        created = client.post("/api/v1/applications", headers=headers, json={
+            "institution_name": "Automatic Handoff Test College",
+            "application_type": "Extension of Approval",
+            "current_stage": "Application Intake",
+            "priority": "Normal",
+        })
+        assert created.status_code == 201
+        app_id = created.json()["id"]
+
+        transitioned = client.post(f"/api/v1/applications/{app_id}/transition", headers=headers, json={
+            "to_stage": "Scrutiny",
+            "status": "In Review",
+            "note": "Intake checks recorded; hand off to scrutiny.",
+        })
+        assert transitioned.status_code == 200
+        assert transitioned.json()["current_stage"] == "Scrutiny"
+        assert transitioned.json()["assigned_to"] == "Scrutiny Reviewer" or transitioned.json()["assigned_to"] == "Scrutiny Officer"
+
+        alerts = client.get("/api/v1/alerts", headers=headers)
+        assert alerts.status_code == 200
+        assert any(
+            alert["application_id"] == app_id
+            and alert["category"] == "Workflow Handoff"
+            and alert["title"] == "Application assigned to your stage"
+            for alert in alerts.json()
+        )
