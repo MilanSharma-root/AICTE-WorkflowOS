@@ -541,8 +541,76 @@ def update_stage_checklist_item(item_id: int, payload: StageChecklistUpdate, db:
     item.updated_by = user.full_name
     item.updated_at = datetime.now(timezone.utc)
     _audit(db, "STAGE_CHECKLIST_ITEM_UPDATED", user.full_name, item.application_id, f"{item.stage}: {item.title} -> {item.status}")
+
+    # Automatically hand off a completed SAC/SHC review to Compliance.
+    # A stage is complete only when every required item is Verified or Not Applicable.
+    advanced_to_compliance = False
+    if application and application.current_stage == "SAC/SHC Review":
+        required_items = db.scalars(select(StageChecklistItem).where(
+            StageChecklistItem.application_id == application.id,
+            StageChecklistItem.stage == "SAC/SHC Review",
+            StageChecklistItem.required.is_(True),
+        )).all()
+        stage_complete = bool(required_items) and all(
+            row.status in {"Verified", "Not Applicable"} for row in required_items
+        )
+        if stage_complete:
+            route = db.scalar(select(ApplicationWorkflowRoute).where(
+                ApplicationWorkflowRoute.application_type == application.application_type,
+                ApplicationWorkflowRoute.active.is_(True)
+            ))
+            config = db.scalar(select(WorkflowConfiguration).where(
+                WorkflowConfiguration.active.is_(True)
+            ).order_by(WorkflowConfiguration.updated_at.desc()))
+            try:
+                configured_stages = json.loads(route.stages_json) if route else (json.loads(config.stages_json) if config else [])
+            except (ValueError, TypeError):
+                configured_stages = []
+            operational_stages = [str(stage) for stage in configured_stages
+                                  if stage not in {"Re-scrutiny", "Returned to Institution", "Approved / Closed", "Rejected"}]
+            if "SAC/SHC Review" in operational_stages:
+                index = operational_stages.index("SAC/SHC Review")
+                next_stage = operational_stages[index + 1] if index + 1 < len(operational_stages) else None
+                if next_stage == "Compliance":
+                    previous_stage = application.current_stage
+                    application.current_stage = next_stage
+                    application.status = "In Review"
+                    next_role = _stage_role(next_stage)
+                    stage_owner = db.scalar(select(User).where(
+                        User.role == next_role, User.active.is_(True)
+                    ).order_by(User.id)) if next_role else None
+                    application.assigned_to = stage_owner.full_name if stage_owner else None
+                    # Seed useful compliance tasks on entry, without duplicating existing items.
+                    compliance_templates = [
+                        "Record each committee condition requiring compliance",
+                        "Verify evidence submitted against each condition",
+                        "Record compliance recommendation for authorised review",
+                    ]
+                    existing_titles = {row.title for row in db.scalars(select(StageChecklistItem).where(
+                        StageChecklistItem.application_id == application.id,
+                        StageChecklistItem.stage == "Compliance",
+                    )).all()}
+                    for title in compliance_templates:
+                        if title not in existing_titles:
+                            db.add(StageChecklistItem(application_id=application.id, stage="Compliance",
+                                title=title, required=True, status="Pending",
+                                notes="Default workflow task; verify against applicable official requirements.",
+                                updated_by="system"))
+                    db.add(WorkflowEvent(application_id=application.id, from_stage=previous_stage,
+                        to_stage=next_stage, status="In Review", actor="system",
+                        note="All required SAC/SHC review checklist items are Verified or Not Applicable; automatically routed to Compliance."))
+                    db.add(Alert(application_id=application.id, title="SAC/SHC review completed",
+                        message=f"{application.application_no} completed SAC/SHC review and moved to Compliance.",
+                        severity="Medium", category="Workflow Handoff"))
+                    _audit(db, "AUTOMATIC_SAC_SHC_HANDOFF", "system", application.id,
+                        "All required SAC/SHC checklist items completed; moved to Compliance.")
+                    advanced_to_compliance = True
+
     db.commit()
-    return {"id": item.id, "status": item.status, "updated_by": item.updated_by, "updated_at": item.updated_at}
+    return {"id": item.id, "status": item.status, "updated_by": item.updated_by,
+            "updated_at": item.updated_at, "advanced_to_compliance": advanced_to_compliance,
+            "message": "SAC/SHC checklist completed; application automatically moved to Compliance."
+                if advanced_to_compliance else "Checklist status updated."}
 
 
 @router.post("/api/v1/college/documents/{document_id}/replace")
