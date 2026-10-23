@@ -356,7 +356,10 @@ def seed_synthetic_supporting_records(db: Session) -> None:
             for title, category in [("Verify recorded undertaking status","Undertaking"),
                                     ("Review illustrative certificate validity","Document Validity")]:
                 due = app.due_date
-                status = "Compliant" if rng.random()<0.45 else ("Overdue" if due and due<utcnow() else "Pending")
+                # SQLite may return naive datetimes while utcnow() is timezone-aware.
+                # Normalize naive due dates to UTC before comparing them.
+                due_utc = due.replace(tzinfo=timezone.utc) if due and due.tzinfo is None else due
+                status = "Compliant" if rng.random()<0.45 else ("Overdue" if due_utc and due_utc<utcnow() else "Pending")
                 db.add(ComplianceItem(application_id=app.id, title=title, category=category,
                     due_date=due, status=status, assigned_to=app.assigned_to,
                     notes="Synthetic demonstration task; not a statutory determination."))
