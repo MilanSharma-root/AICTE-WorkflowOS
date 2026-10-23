@@ -156,3 +156,24 @@ class DocumentValidity(Base):
     updated_by: Mapped[str] = mapped_column(String(160), default="system")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CollegeProfile(Base):
+    __tablename__ = "college_profiles"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id"), index=True)
+    institution_name: Mapped[str] = mapped_column(String(240))
+    contact_email: Mapped[str] = mapped_column(String(254), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DocumentQualityCheck(Base):
+    __tablename__ = "document_quality_checks"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("document_records.id"), unique=True, index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id"), index=True)
+    slot_name: Mapped[str] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(40), default="Needs Review")
+    findings_json: Mapped[str] = mapped_column(Text, default="[]")
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
