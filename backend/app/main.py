@@ -553,6 +553,9 @@ def get_last_compliance_automation(db: Session = Depends(get_db),
     row = db.scalar(select(AuditEvent).where(AuditEvent.action == "COMPLIANCE_AUTOMATION_RUN").order_by(AuditEvent.created_at.desc()))
     if not row or not row.details:
         return None
+    # Do not expose an administrator's cross-application run details to a stage-scoped officer.
+    if user.role == "compliance_officer" and row.actor != user.full_name:
+        return None
     try:
         return json.loads(row.details)
     except (ValueError, TypeError):
