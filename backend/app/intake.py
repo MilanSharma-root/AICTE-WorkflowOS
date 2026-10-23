@@ -606,11 +606,76 @@ def update_stage_checklist_item(item_id: int, payload: StageChecklistUpdate, db:
                         "All required SAC/SHC checklist items completed; moved to Compliance.")
                     advanced_to_compliance = True
 
+    advanced_to_final_approval = False
+    if application and application.current_stage == "Compliance":
+        required_items = db.scalars(select(StageChecklistItem).where(
+            StageChecklistItem.application_id == application.id,
+            StageChecklistItem.stage == "Compliance",
+            StageChecklistItem.required.is_(True),
+        )).all()
+        stage_complete = bool(required_items) and all(
+            row.status in {"Verified", "Not Applicable"} for row in required_items
+        )
+        if stage_complete:
+            route = db.scalar(select(ApplicationWorkflowRoute).where(
+                ApplicationWorkflowRoute.application_type == application.application_type,
+                ApplicationWorkflowRoute.active.is_(True)
+            ))
+            config = db.scalar(select(WorkflowConfiguration).where(
+                WorkflowConfiguration.active.is_(True)
+            ).order_by(WorkflowConfiguration.updated_at.desc()))
+            try:
+                configured_stages = json.loads(route.stages_json) if route else (json.loads(config.stages_json) if config else [])
+            except (ValueError, TypeError):
+                configured_stages = []
+            operational_stages = [str(stage) for stage in configured_stages
+                                  if stage not in {"Re-scrutiny", "Returned to Institution", "Approved / Closed", "Rejected"}]
+            if "Compliance" in operational_stages:
+                index = operational_stages.index("Compliance")
+                next_stage = operational_stages[index + 1] if index + 1 < len(operational_stages) else None
+                if next_stage == "Final Approval":
+                    previous_stage = application.current_stage
+                    application.current_stage = next_stage
+                    application.status = "In Review"
+                    next_role = _stage_role(next_stage)
+                    stage_owner = db.scalar(select(User).where(
+                        User.role == next_role, User.active.is_(True)
+                    ).order_by(User.id)) if next_role else None
+                    application.assigned_to = stage_owner.full_name if stage_owner else None
+                    final_templates = [
+                        "Review complete application record and committee recommendation",
+                        "Record authorised final decision and rationale",
+                    ]
+                    existing_titles = {row.title for row in db.scalars(select(StageChecklistItem).where(
+                        StageChecklistItem.application_id == application.id,
+                        StageChecklistItem.stage == "Final Approval",
+                    )).all()}
+                    for title in final_templates:
+                        if title not in existing_titles:
+                            db.add(StageChecklistItem(application_id=application.id, stage="Final Approval",
+                                title=title, required=True, status="Pending",
+                                notes="Final decision must be recorded by the authorised officer.",
+                                updated_by="system"))
+                    db.add(WorkflowEvent(application_id=application.id, from_stage=previous_stage,
+                        to_stage=next_stage, status="In Review", actor="system",
+                        note="All required Compliance checklist items are Verified or Not Applicable; routed to Final Approval. No approval decision was made automatically."))
+                    db.add(Alert(application_id=application.id, title="Compliance completed",
+                        message=f"{application.application_no} completed Compliance and is ready for authorised Final Approval review.",
+                        severity="Medium", category="Workflow Handoff"))
+                    _audit(db, "AUTOMATIC_COMPLIANCE_HANDOFF", "system", application.id,
+                        "All required Compliance checklist items completed; moved to Final Approval for human decision.")
+                    advanced_to_final_approval = True
+
     db.commit()
+    if advanced_to_final_approval:
+        message = "Compliance checklist completed; application automatically moved to Final Approval."
+    elif advanced_to_compliance:
+        message = "SAC/SHC checklist completed; application automatically moved to Compliance."
+    else:
+        message = "Checklist status updated."
     return {"id": item.id, "status": item.status, "updated_by": item.updated_by,
             "updated_at": item.updated_at, "advanced_to_compliance": advanced_to_compliance,
-            "message": "SAC/SHC checklist completed; application automatically moved to Compliance."
-                if advanced_to_compliance else "Checklist status updated."}
+            "advanced_to_final_approval": advanced_to_final_approval, "message": message}
 
 
 @router.post("/api/v1/college/documents/{document_id}/replace")
