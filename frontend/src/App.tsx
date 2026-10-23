@@ -113,8 +113,8 @@ export default function App(){
   catch(err){setLoginError(err instanceof Error?err.message:"Login failed");}finally{setLoginBusy(false);}
  }
  async function createStageChecklistItem(e:FormEvent<HTMLFormElement>){
-  e.preventDefault();if(!selectedDetails)return;const f=new FormData(e.currentTarget);
-  try{await request("/api/v1/applications/"+selectedDetails.id+"/stage-checklist",token,{method:"POST",body:JSON.stringify({stage:f.get("stage"),title:f.get("title"),required:f.get("required")==="on",notes:f.get("notes")||null})});const rows=await request<StageChecklistRow[]>("/api/v1/applications/"+selectedDetails.id+"/stage-checklist",token);setStageChecklist(rows);notify("Stage checklist item saved.");e.currentTarget.reset();}
+  e.preventDefault();if(!selectedDetails)return;const form=e.currentTarget;const f=new FormData(form);
+  try{await request("/api/v1/applications/"+selectedDetails.id+"/stage-checklist",token,{method:"POST",body:JSON.stringify({stage:f.get("stage"),title:f.get("title"),required:f.get("required")==="on",notes:f.get("notes")||null})});const rows=await request<StageChecklistRow[]>("/api/v1/applications/"+selectedDetails.id+"/stage-checklist",token);setStageChecklist(rows);notify("Stage checklist item saved.");form.reset();}
   catch(err){notify(err instanceof Error?err.message:"Could not save stage checklist item");}
  }
  async function updateStageChecklistItem(item:StageChecklistRow,status:string){
