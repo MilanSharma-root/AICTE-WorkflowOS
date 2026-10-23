@@ -522,6 +522,64 @@ def transition_application(application_id: int, payload: TransitionIn, db: Sessi
     old_stage = item.current_stage
     item.current_stage = payload.to_stage
     item.status = "Completed" if payload.to_stage == "Approved / Closed" else ("Rejected" if payload.to_stage == "Rejected" else ("Returned" if payload.to_stage == "Returned to Institution" else payload.status))
+
+    # End-to-end routing: after an authorised transition, route the open case to
+    # the active owner of its new stage and create a deduplicated in-app handoff.
+    # The system never makes the statutory decision itself.
+    next_stage_roles = {
+        "Application Intake": "scrutiny_officer",
+        "Scrutiny": "scrutiny_officer",
+        "Re-scrutiny": "scrutiny_officer",
+        "EVC Scheduling": "evc_officer",
+        "EVC Visit": "evc_officer",
+        "SAC/SHC Review": "sac_shc_officer",
+        "Compliance": "compliance_officer",
+        "Final Approval": "final_approval_officer",
+    }
+    if item.current_stage in TERMINAL_STAGES:
+        item.assigned_to = None
+    elif item.current_stage == "Returned to Institution":
+        # The college must correct the submission before it returns to scrutiny.
+        item.assigned_to = None
+        title = "Action required: application returned for correction"
+        exists = db.scalar(select(Alert.id).where(
+            Alert.application_id == item.id, Alert.category == "Workflow Handoff",
+            Alert.title == title, Alert.acknowledged.is_(False),
+        ))
+        if not exists:
+            db.add(Alert(application_id=item.id, title=title,
+                         message=f"{item.application_no} was returned to the institution. Review the recorded reason, correct the submission, and resubmit through the College Portal.",
+                         severity="High", category="Workflow Handoff"))
+    else:
+        target_role = next_stage_roles.get(item.current_stage)
+        target_user = db.scalar(
+            select(User).where(User.role == target_role, User.active.is_(True)).order_by(User.id)
+        ) if target_role else None
+        if target_user:
+            item.assigned_to = target_user.full_name
+            title = "Application assigned to your stage"
+            exists = db.scalar(select(Alert.id).where(
+                Alert.application_id == item.id, Alert.category == "Workflow Handoff",
+                Alert.title == title, Alert.message.contains(target_user.username),
+                Alert.acknowledged.is_(False),
+            ))
+            if not exists:
+                db.add(Alert(application_id=item.id, title=title,
+                             message=f"{item.application_no} is now at {item.current_stage} and assigned to {target_user.full_name} ({target_user.username}). Please review the case and required checklist.",
+                             severity="Medium", category="Workflow Handoff"))
+            audit(db, "AUTOMATION_CASE_ASSIGNED", "system", item.id,
+                  f"Assigned to {target_user.username} for stage {item.current_stage} after transition.")
+        else:
+            item.assigned_to = None
+            title = "Workflow handoff requires configuration"
+            exists = db.scalar(select(Alert.id).where(
+                Alert.application_id == item.id, Alert.category == "Workflow Handoff",
+                Alert.title == title, Alert.acknowledged.is_(False),
+            ))
+            if not exists:
+                db.add(Alert(application_id=item.id, title=title,
+                             message=f"{item.application_no} reached '{item.current_stage}', but no active authorised stage owner is configured. An administrator must configure the owner before work continues.",
+                             severity="High", category="Workflow Handoff"))
     db.add(WorkflowEvent(application_id=item.id, from_stage=old_stage, to_stage=payload.to_stage, status=item.status, note=payload.note, actor=user.full_name))
     audit(db, "WORKFLOW_TRANSITION", user.full_name, item.id, f"{old_stage} -> {payload.to_stage}; status={item.status}; note={payload.note or ''}")
     db.commit(); db.refresh(item)
