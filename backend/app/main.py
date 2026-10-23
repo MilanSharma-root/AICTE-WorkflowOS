@@ -429,6 +429,63 @@ def update_application(application_id: int, payload: ApplicationUpdate, db: Sess
     return item
 
 @app.post("/api/v1/applications/{application_id}/transition", response_model=ApplicationOut)
+def try_auto_route_to_evc(db: Session, application: Application, actor: str) -> bool:
+    """Route a scrutiny-approved application to the EVC queue once every required
+    document checklist item is verified. This creates a queue item, not a visit
+    appointment; no date or panel is fabricated.
+    """
+    if application.current_stage not in {"Scrutiny", "Re-scrutiny"}:
+        return False
+    required_checks = db.scalars(select(ApplicationDocumentCheck).where(
+        ApplicationDocumentCheck.application_id == application.id,
+        ApplicationDocumentCheck.required.is_(True),
+    )).all()
+    if not required_checks or any(check.status not in {"Verified", "Not Applicable"} for check in required_checks):
+        return False
+    quality_issues = db.scalars(select(DocumentQualityCheck).where(
+        DocumentQualityCheck.application_id == application.id,
+        DocumentQualityCheck.status == "Needs Correction",
+    )).all()
+    if quality_issues:
+        return False
+    stages = stages_for_application(db, application.application_type)
+    operational_stages = [stage for stage in stages if stage not in {"Re-scrutiny", "Returned to Institution", "Approved / Closed", "Rejected"}]
+    reference_stage = "Scrutiny" if application.current_stage == "Re-scrutiny" else application.current_stage
+    if reference_stage not in operational_stages:
+        return False
+    current_index = operational_stages.index(reference_stage)
+    if current_index + 1 >= len(operational_stages) or operational_stages[current_index + 1] != "EVC Scheduling":
+        return False
+    old_stage = application.current_stage
+    application.current_stage = "EVC Scheduling"
+    application.status = "In Review"
+    evc_visit = db.scalar(select(EVCVisit).where(
+        EVCVisit.application_id == application.id,
+        EVCVisit.status.not_in(["Completed", "Cancelled"]),
+    ).limit(1))
+    if not evc_visit:
+        db.add(EVCVisit(
+            application_id=application.id,
+            proposed_date=None,
+            location="Institution campus",
+            panel_members=None,
+            status="Pending Scheduling",
+        ))
+    evc_officer = db.scalar(select(User).where(
+        User.role == "evc_officer", User.active.is_(True)
+    ).order_by(User.id))
+    if evc_officer:
+        application.assigned_to = evc_officer.full_name
+    db.add(WorkflowEvent(
+        application_id=application.id, from_stage=old_stage, to_stage=application.current_stage,
+        status=application.status, actor=actor,
+        note="All required document checklist items verified; automatically routed to EVC queue. Visit scheduling remains pending.",
+    ))
+    audit(db, "AUTOMATIC_EVC_HANDOFF", actor, application.id,
+          f"All required document checklist items verified; moved from {old_stage} to EVC Scheduling.")
+    return True
+
+
 def transition_application(application_id: int, payload: TransitionIn, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "reviewer", "scrutiny_officer", "evc_officer", "sac_shc_officer", "compliance_officer", "final_approval_officer"))):
     item = db.get(Application, application_id)
     if not item: raise HTTPException(404, "Application not found")
@@ -752,26 +809,49 @@ def update_evc(visit_id: int, payload: EVCVisitUpdate, db: Session = Depends(get
     for key, value in payload.model_dump(exclude_unset=True).items(): setattr(item, key, value)
     audit(db, "EVC_VISIT_UPDATED", user.full_name, item.application_id, f"Status: {item.status}; outcome: {item.outcome or ''}")
 
-    # Completing the EVC visit must also hand the application to the next workflow stage.
-    # Merely marking the visit record complete previously left the application on EVC.
-    if app_item and app_item.current_stage == "EVC Visit" and str(item.status).strip().lower() in {"completed", "complete"}:
+    # When the EVC visit is completed, route to the next configured operational
+    # stage for this application type. Never hardcode SAC/SHC as the next stage.
+    if app_item and str(item.status).strip().lower() in {"completed", "complete"} and app_item.current_stage in {"EVC Scheduling", "EVC Visit"}:
         stages = stages_for_application(db, app_item.application_type)
-        if "SAC/SHC Review" not in stages:
-            raise HTTPException(422, "SAC/SHC Review is not configured as the next workflow stage.")
         operational_stages = [stage for stage in stages if stage not in {"Re-scrutiny", "Returned to Institution", "Approved / Closed", "Rejected"}]
-        if "EVC Visit" not in operational_stages or operational_stages.index("EVC Visit") + 1 >= len(operational_stages) or operational_stages[operational_stages.index("EVC Visit") + 1] != "SAC/SHC Review":
-            raise HTTPException(422, "The configured workflow route does not place SAC/SHC Review immediately after EVC Visit.")
+        if "EVC Visit" not in operational_stages:
+            raise HTTPException(422, "EVC Visit is not present in this application's configured workflow route.")
+        evc_index = operational_stages.index("EVC Visit")
+        if evc_index + 1 >= len(operational_stages):
+            raise HTTPException(422, "No next operational stage is configured after EVC Visit. Ask an administrator to review the workflow route.")
+        next_stage = operational_stages[evc_index + 1]
+        if next_stage in {"Approved / Closed", "Rejected"}:
+            raise HTTPException(409, "EVC is complete, but the configured next step is a terminal decision. An authorised officer must record that decision explicitly.")
         old_stage = app_item.current_stage
-        app_item.current_stage = "SAC/SHC Review"
-        app_item.status = "In Review"
-        next_officer = db.scalar(select(User).where(User.role == "sac_shc_officer", User.active.is_(True)).order_by(User.id))
-        if next_officer:
-            app_item.assigned_to = next_officer.full_name
-        db.add(WorkflowEvent(application_id=app_item.id, from_stage=old_stage, to_stage=app_item.current_stage,
-                             status=app_item.status, actor=user.full_name,
-                             note="EVC visit marked complete; handed off to SAC/SHC review"))
-        audit(db, "WORKFLOW_STAGE_HANDOFF", user.full_name, app_item.id,
-              f"EVC visit completed; moved from {old_stage} to {app_item.current_stage}")
+        # Do not repeat a handoff if the same visit is updated to Completed again.
+        already_handed_off = db.scalar(select(WorkflowEvent.id).where(
+            WorkflowEvent.application_id == app_item.id,
+            WorkflowEvent.from_stage == old_stage,
+            WorkflowEvent.to_stage == next_stage,
+            WorkflowEvent.note.like("EVC visit marked complete%"),
+        ))
+        if not already_handed_off:
+            app_item.current_stage = next_stage
+            app_item.status = "In Review"
+            next_stage_roles = {
+                "Application Intake": "scrutiny_officer", "Scrutiny": "scrutiny_officer",
+                "Re-scrutiny": "scrutiny_officer", "EVC Scheduling": "evc_officer",
+                "EVC Visit": "evc_officer", "SAC/SHC Review": "sac_shc_officer",
+                "Compliance": "compliance_officer", "Final Approval": "final_approval_officer",
+            }
+            next_role = next_stage_roles.get(next_stage)
+            next_officer = db.scalar(select(User).where(
+                User.role == next_role, User.active.is_(True)
+            ).order_by(User.id)) if next_role else None
+            if next_officer:
+                app_item.assigned_to = next_officer.full_name
+            db.add(WorkflowEvent(
+                application_id=app_item.id, from_stage=old_stage, to_stage=next_stage,
+                status=app_item.status, actor=user.full_name,
+                note=f"EVC visit marked complete; automatically handed off to {next_stage}",
+            ))
+            audit(db, "WORKFLOW_STAGE_HANDOFF", user.full_name, app_item.id,
+                  f"EVC visit completed; moved from {old_stage} to configured next stage {next_stage}")
     db.commit(); db.refresh(item); db.refresh(app_item) if app_item else None
     return {"id": item.id, "application_id": item.application_id, "proposed_date": item.proposed_date, "location": item.location, "panel_members": item.panel_members, "status": item.status, "outcome": item.outcome}
 
@@ -878,8 +958,12 @@ def update_document_check(check_id: int, payload: DocumentCheckUpdate, db: Sessi
     check.updated_by = user.full_name
     check.updated_at = utcnow()
     audit(db, "DOCUMENT_CHECKLIST_ITEM_UPDATED", user.full_name, check.application_id, f"{check.label}: {check.status}")
+    auto_routed_to_evc = bool(app_item and try_auto_route_to_evc(db, app_item, user.full_name))
     db.commit()
-    return {"id": check.id, "status": check.status, "document_id": check.document_id, "updated_by": check.updated_by, "updated_at": check.updated_at}
+    response = {"id": check.id, "status": check.status, "document_id": check.document_id, "updated_by": check.updated_by, "updated_at": check.updated_at}
+    response["automatic_evc_handoff"] = auto_routed_to_evc
+    response["application_stage"] = app_item.current_stage if app_item else None
+    return response
 
 @app.get("/api/v1/applications/{application_id}/documents")
 def list_documents(application_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
