@@ -10,7 +10,6 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from pydantic import EmailStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from PIL import Image, ImageFilter, ImageStat
@@ -121,10 +120,8 @@ async def create_college_submission(
 ):
     """Create a college account and an application with exactly three required intake documents."""
     email = email.strip().lower()
-    try:
-        EmailStr.validate(email)
-    except Exception as exc:
-        raise HTTPException(422, "Enter a valid institutional email address") from exc
+    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+        raise HTTPException(422, "Enter a valid institutional email address")
     if db.scalar(select(User.id).where(User.username == email)):
         raise HTTPException(409, "An account already exists for this email. Sign in to the College Portal instead.")
     files = [
