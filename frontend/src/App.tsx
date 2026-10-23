@@ -24,7 +24,15 @@ function overviewStepState(app:AppRow|undefined,index:number):"complete"|"active
  const stage=app.current_stage||"Application Intake";
  if(app.status==="Rejected")return index===4?"blocked":index<4?"complete":"waiting";
  if(app.status==="Completed"||stage==="Approved / Closed")return "complete";
- const stageIndex=stage==="Application Intake"?0:stage==="Scrutiny"||stage==="Re-scrutiny"||stage==="Returned to Institution"?1:stage==="EVC Scheduling"||stage==="EVC Visit"?2:stage==="SAC/SHC Review"||stage==="Compliance"?3:stage==="Final Approval"?4:0;
+ // A clean submission has completed automated screening even while it is still
+ // at Application Intake. Returned applications remain blocked until corrected.
+ if(stage==="Application Intake"){
+  if(app.status==="Returned")return index===0?"blocked":"waiting";
+  if(index===0)return "complete";
+  if(index===1)return "active";
+  return "waiting";
+ }
+ const stageIndex=stage==="Scrutiny"||stage==="Re-scrutiny"||stage==="Returned to Institution"?1:stage==="EVC Scheduling"||stage==="EVC Visit"?2:stage==="SAC/SHC Review"||stage==="Compliance"?3:stage==="Final Approval"?4:0;
  if(index<stageIndex)return "complete";if(index===stageIndex)return app.status==="Returned"?"blocked":"active";return "waiting";
 }
 type Page = "Overview"|"Applications"|"Scrutiny Queue"|"EVC & Visits"|"SAC/SHC Review"|"Compliance"|"Final Approval"|"Document Validity"|"Undertakings"|"Documents"|"Alerts"|"Reports"|"Workflow Configuration"|"Audit Trail";
