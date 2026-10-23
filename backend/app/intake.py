@@ -11,12 +11,13 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
 from PIL import Image, ImageFilter, ImageStat
 from pypdf import PdfReader
 
 from app.config import settings
 from app.database import get_db
-from app.models import Alert, Application, AuditEvent, CollegeProfile, DocumentQualityCheck, DocumentRecord, User, WorkflowEvent
+from app.models import Alert, Application, AuditEvent, CollegeProfile, DocumentQualityCheck, DocumentRecord, StageChecklistItem, User, WorkflowEvent
 from app.security import current_user, hash_password
 
 router = APIRouter()
@@ -271,3 +272,74 @@ def get_application_document_quality(application_id: int, db: Session = Depends(
         "document_id": check.document_id, "slot": check.slot_name, "status": check.status,
         "findings": json.loads(check.findings_json), "checked_at": check.checked_at,
     } for check in checks]
+
+
+class StageChecklistCreate(BaseModel):
+    stage: str = Field(min_length=2, max_length=100)
+    title: str = Field(min_length=2, max_length=240)
+    required: bool = True
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class StageChecklistUpdate(BaseModel):
+    status: str
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+def _stage_role(stage: str) -> str | None:
+    return {
+        "Application Intake": "scrutiny_officer", "Scrutiny": "scrutiny_officer", "Re-scrutiny": "scrutiny_officer",
+        "EVC Scheduling": "evc_officer", "EVC Visit": "evc_officer",
+        "SAC/SHC Review": "sac_shc_officer", "Compliance": "compliance_officer",
+    }.get(stage)
+
+
+@router.get("/api/v1/applications/{application_id}/stage-checklist")
+def get_stage_checklist(application_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    if user.role not in {"admin", "officer", "reviewer", "auditor", "scrutiny_officer", "evc_officer", "sac_shc_officer", "compliance_officer", "final_approval_officer"}:
+        raise HTTPException(403, "Authorised staff role required")
+    if not db.get(Application, application_id):
+        raise HTTPException(404, "Application not found")
+    rows = db.scalars(select(StageChecklistItem).where(StageChecklistItem.application_id == application_id).order_by(StageChecklistItem.stage, StageChecklistItem.id)).all()
+    return [{"id": row.id, "application_id": row.application_id, "stage": row.stage, "title": row.title,
+             "required": row.required, "status": row.status, "notes": row.notes,
+             "updated_by": row.updated_by, "updated_at": row.updated_at} for row in rows]
+
+
+@router.post("/api/v1/applications/{application_id}/stage-checklist", status_code=201)
+def create_stage_checklist_item(application_id: int, payload: StageChecklistCreate, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    application = db.get(Application, application_id)
+    if not application:
+        raise HTTPException(404, "Application not found")
+    if user.role not in {"admin", "officer"} and user.role != _stage_role(payload.stage):
+        raise HTTPException(403, "Only an authorised officer for this stage may add checklist items")
+    item = StageChecklistItem(application_id=application_id, stage=payload.stage, title=payload.title.strip(),
+                              required=payload.required, status="Pending", notes=payload.notes, updated_by=user.full_name)
+    db.add(item)
+    db.flush()
+    _audit(db, "STAGE_CHECKLIST_ITEM_CREATED", user.full_name, application_id, f"{payload.stage}: {payload.title}")
+    db.commit()
+    db.refresh(item)
+    return {"id": item.id, "application_id": item.application_id, "stage": item.stage, "title": item.title,
+            "required": item.required, "status": item.status, "notes": item.notes, "updated_by": item.updated_by}
+
+
+@router.patch("/api/v1/stage-checklist/{item_id}")
+def update_stage_checklist_item(item_id: int, payload: StageChecklistUpdate, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    item = db.get(StageChecklistItem, item_id)
+    if not item:
+        raise HTTPException(404, "Stage checklist item not found")
+    if user.role not in {"admin", "reviewer"} and user.role != _stage_role(item.stage):
+        raise HTTPException(403, "Your role cannot update this stage checklist")
+    if payload.status not in {"Pending", "Verified", "Blocked", "Not Applicable"}:
+        raise HTTPException(422, "Status must be Pending, Verified, Blocked or Not Applicable")
+    if payload.status == "Blocked" and not (payload.notes or item.notes or "").strip():
+        raise HTTPException(422, "Add a note explaining why this checklist item is blocked")
+    item.status = payload.status
+    if payload.notes is not None:
+        item.notes = payload.notes
+    item.updated_by = user.full_name
+    item.updated_at = datetime.now(timezone.utc)
+    _audit(db, "STAGE_CHECKLIST_ITEM_UPDATED", user.full_name, item.application_id, f"{item.stage}: {item.title} -> {item.status}")
+    db.commit()
+    return {"id": item.id, "status": item.status, "updated_by": item.updated_by, "updated_at": item.updated_at}
