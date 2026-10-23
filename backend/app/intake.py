@@ -2,7 +2,6 @@ import json
 import os
 import re
 import smtplib
-import statistics
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from io import BytesIO
@@ -168,7 +167,8 @@ async def create_college_submission(
         db.add(record)
         db.flush()
         findings = _analyse_document(slot_label, filename, data, institution_name.strip())
-        status = "Needs Correction" if findings else "Preliminary Checks Passed"
+        is_image = Path(filename).suffix.lower() in {".png", ".jpg", ".jpeg"}
+        status = "Needs Correction" if findings else ("Manual Review Required" if is_image else "Preliminary Checks Passed")
         db.add(DocumentQualityCheck(document_id=record.id, application_id=application.id,
                                     slot_name=slot_label, status=status, findings_json=json.dumps(findings)))
         if findings:
@@ -181,16 +181,21 @@ async def create_college_submission(
            f"{application.application_no}; exactly three required documents stored")
     email_sent = False
     if all_issues:
-        db.add(Alert(application_id=application.id, title="Document correction required",
-                     message=f"{application.application_no}: preliminary document checks found {len(all_issues)} issue(s). " +
-                             ("A correction email was sent." if os.getenv("SMTP_HOST") and os.getenv("SMTP_FROM") else "Email delivery is not configured; contact details are recorded for follow-up."),
-                     severity="High", category="Document Quality"))
+        correction_alert = Alert(application_id=application.id, title="Document correction required",
+                                 message=f"{application.application_no}: preliminary document checks found {len(all_issues)} issue(s).",
+                                 severity="High", category="Document Quality")
+        db.add(correction_alert)
         try:
             email_sent = _send_correction_email(email, application.application_no, institution_name.strip(), all_issues)
         except Exception as exc:
             _audit(db, "CORRECTION_EMAIL_FAILED", "system", application.id, f"SMTP delivery failed: {type(exc).__name__}")
-        if email_sent:
-            _audit(db, "CORRECTION_EMAIL_SENT", "system", application.id, f"Correction notice sent to {email}")
+            correction_alert.message += " Correction email delivery failed; review the audit trail and contact the institution through an approved channel."
+        else:
+            if email_sent:
+                _audit(db, "CORRECTION_EMAIL_SENT", "system", application.id, f"Correction notice sent to {email}")
+                correction_alert.message += " A correction email was sent."
+            else:
+                correction_alert.message += " Email delivery is not configured; contact details are recorded for follow-up."
     db.commit()
     return {
         "application_id": application.id,
@@ -198,7 +203,7 @@ async def create_college_submission(
         "institution_name": application.institution_name,
         "status": application.status,
         "document_count": len(prepared),
-        "document_checks": [{"slot": slot_label, "status": "Needs Correction" if any(issue.startswith(slot_label + ":") for issue in all_issues) else "Preliminary Checks Passed"} for _, slot_label, _, _, _ in prepared],
+        "document_checks": [{"slot": slot_label, "status": "Needs Correction" if any(issue.startswith(slot_label + ":") for issue in all_issues) else ("Manual Review Required" if Path(filename).suffix.lower() in {".png", ".jpg", ".jpeg"} else "Preliminary Checks Passed")} for _, slot_label, filename, _, _ in prepared],
         "issues": all_issues,
         "correction_email_sent": email_sent,
         "email_delivery_configured": bool(os.getenv("SMTP_HOST") and os.getenv("SMTP_FROM")),
@@ -242,7 +247,7 @@ def get_officer_queue(db: Session = Depends(get_db), user: User = Depends(curren
         "evc_officer": {"EVC Scheduling", "EVC Visit"},
         "sac_shc_officer": {"SAC/SHC Review"},
         "compliance_officer": {"Compliance"},
-        "final_approval_officer": {"Approved / Closed"},
+        "final_approval_officer": {"Compliance"},
     }
     if user.role not in stage_access:
         raise HTTPException(403, "A stage-specific officer account is required")
