@@ -343,3 +343,75 @@ def update_stage_checklist_item(item_id: int, payload: StageChecklistUpdate, db:
     _audit(db, "STAGE_CHECKLIST_ITEM_UPDATED", user.full_name, item.application_id, f"{item.stage}: {item.title} -> {item.status}")
     db.commit()
     return {"id": item.id, "status": item.status, "updated_by": item.updated_by, "updated_at": item.updated_at}
+
+
+@router.post("/api/v1/college/documents/{document_id}/replace")
+async def replace_college_document(document_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(current_user)):
+    if user.role != "college":
+        raise HTTPException(403, "College account required")
+    profile = db.scalar(select(CollegeProfile).where(CollegeProfile.user_id == user.id))
+    if not profile:
+        raise HTTPException(404, "College profile not found")
+    record = db.get(DocumentRecord, document_id)
+    if not record or record.application_id != profile.application_id:
+        raise HTTPException(404, "Document not found for this college application")
+    safe_name = Path(file.filename or "").name
+    if not safe_name or Path(safe_name).suffix.lower() not in ALLOWED_EXTENSIONS:
+        raise HTTPException(415, "Upload a PDF, PNG or JPEG file")
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if not data:
+        raise HTTPException(422, "File is empty")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"File exceeds the {settings.max_upload_mb} MB limit")
+    old_path = Path(settings.upload_dir) / record.storage_key
+    storage_key = uuid4().hex + Path(safe_name).suffix.lower()
+    target = Path(settings.upload_dir) / storage_key
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    record.storage_key = storage_key
+    record.original_name = safe_name
+    record.content_type = file.content_type or "application/octet-stream"
+    record.size_bytes = len(data)
+    record.uploaded_by = profile.institution_name
+    check = db.scalar(select(DocumentQualityCheck).where(DocumentQualityCheck.document_id == record.id))
+    findings = _analyse_document(check.slot_name if check else "College document", safe_name, data, profile.institution_name)
+    if check:
+        check.status = "Needs Correction" if findings else ("Manual Review Required" if Path(safe_name).suffix.lower() in {".png", ".jpg", ".jpeg"} else "Preliminary Checks Passed")
+        check.findings_json = json.dumps(findings)
+        check.checked_at = datetime.now(timezone.utc)
+    remaining = db.scalars(select(DocumentQualityCheck).where(
+        DocumentQualityCheck.application_id == profile.application_id,
+        DocumentQualityCheck.status == "Needs Correction",
+        DocumentQualityCheck.document_id != record.id,
+    )).all()
+    all_issues = [f"{row.slot_name}: {finding}" for row in remaining for finding in json.loads(row.findings_json)]
+    all_issues.extend([f"{check.slot_name}: {finding}" for finding in findings] if check else findings)
+    _audit(db, "COLLEGE_DOCUMENT_REPLACED", profile.institution_name, profile.application_id, f"Corrected document: {check.slot_name if check else safe_name}")
+    if all_issues:
+        alert = Alert(application_id=profile.application_id, title="Document correction required",
+                      message=f"{len(all_issues)} preliminary document issue(s) remain. " +
+                              ("A correction email was sent." if os.getenv("SMTP_HOST") and os.getenv("SMTP_FROM") else "Email delivery is not configured; follow up through an approved channel."),
+                      severity="High", category="Document Quality")
+        db.add(alert)
+        try:
+            if _send_correction_email(profile.contact_email, db.get(Application, profile.application_id).application_no,
+                                      profile.institution_name, all_issues):
+                _audit(db, "CORRECTION_EMAIL_SENT", "system", profile.application_id, f"Correction notice sent to {profile.contact_email}")
+            else:
+                alert.message = f"{len(all_issues)} preliminary document issue(s) remain. Email delivery is not configured; follow up through an approved channel."
+        except Exception as exc:
+            alert.message = f"{len(all_issues)} preliminary document issue(s) remain. Correction email delivery failed."
+            _audit(db, "CORRECTION_EMAIL_FAILED", "system", profile.application_id, f"SMTP delivery failed: {type(exc).__name__}")
+    else:
+        for alert in db.scalars(select(Alert).where(Alert.application_id == profile.application_id, Alert.category == "Document Quality", Alert.acknowledged.is_(False))).all():
+            alert.acknowledged = True
+            alert.acknowledged_by = "system"
+        _audit(db, "DOCUMENT_CORRECTIONS_CLEARED", "system", profile.application_id, "No remaining automated correction findings; human verification is still required.")
+    db.commit()
+    if old_path.exists():
+        try:
+            old_path.unlink()
+        except OSError:
+            pass
+    return {"document_id": record.id, "status": check.status if check else "Manual Review Required",
+            "findings": findings, "remaining_issues": all_issues}
