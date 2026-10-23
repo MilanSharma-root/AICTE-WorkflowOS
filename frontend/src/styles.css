@@ -375,3 +375,24 @@ tbody tr:last-child td { border-bottom: 0; }
  .detail-only-shell .college-detail-panel>.panel-heading:first-child{top:60px;align-items:flex-start;gap:10px}
  .detail-only-shell .detail-back-button{font-size:11px;padding:8px}
 }
+
+
+/* Make the automatic work visible during a live college application demo. */
+.automation-trace-panel{margin:18px 0 22px;border:1px solid #dbe6f2;background:linear-gradient(180deg,#fbfdff,#fff)}
+.automation-trace-panel>.panel-heading h2{display:flex;align-items:center;gap:8px}
+.automation-trace-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:0 16px 14px}
+.automation-trace-step{display:flex;gap:10px;align-items:flex-start;min-width:0;padding:13px;border:1px solid #e4eaf2;border-radius:10px;background:#fff}
+.automation-trace-number{width:28px;height:28px;flex:0 0 28px;display:grid;place-items:center;border-radius:50%;background:#edf3fa;color:#5e7189;font-weight:800;font-size:11px}
+.automation-trace-step.complete{border-color:#b9e4d1;background:#f7fcf9}
+.automation-trace-step.complete .automation-trace-number{background:#d9f4e6;color:#18784e}
+.automation-trace-step.blocked{border-color:#f0c4c0;background:#fff9f8}
+.automation-trace-step.blocked .automation-trace-number{background:#fde4e2;color:#b42318}
+.automation-trace-step>div{min-width:0}
+.automation-trace-step strong{display:block;font-size:11px;color:#243a53;line-height:1.45}
+.automation-trace-step p{font-size:10px;color:#62758b;line-height:1.55;margin:6px 0 9px}
+.automation-trace-step small{font-size:8px;font-weight:800;letter-spacing:.07em;color:#718198}
+.automation-trace-step.complete small{color:#18784e}
+.automation-trace-step.blocked small{color:#b42318}
+.automation-trace-foot{margin:0;padding:12px 16px;border-top:1px solid #e6edf5;background:#f7faff;color:#61738a;font-size:10px;line-height:1.6}
+@media(max-width:1000px){.automation-trace-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.automation-trace-grid{grid-template-columns:1fr;padding:0 10px 10px}.automation-trace-panel>.panel-heading{align-items:flex-start;gap:8px}}
