@@ -352,3 +352,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .stage-checklist-form .primary-button{padding:9px 10px}
 @media(max-width:900px){.stage-checklist-form{grid-template-columns:1fr 1fr}.stage-checklist-form .checkbox-label{align-self:center}}
 @media(max-width:560px){.stage-check-row{align-items:flex-start;flex-direction:column}.stage-checklist-form{grid-template-columns:1fr}}
+
+.college-correction-form{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap;margin-top:10px}
+.college-correction-form label{display:grid;gap:5px;font-size:10px;font-weight:700;color:#52647a}
+.college-correction-form input[type=file]{max-width:290px;width:100%;padding:7px;border:1px dashed #b9c9dc;border-radius:6px;background:#fff;font-size:10px}
+.college-correction-form .secondary-button{padding:8px 10px}
