@@ -365,3 +365,13 @@ tbody tr:last-child td { border-bottom: 0; }
 .detail-only-shell .page-heading{display:none}
 .detail-only-shell .content>*:not(.college-detail-panel){display:none!important}
 .detail-only-shell .college-detail-panel{display:block!important;margin:20px auto;max-width:1400px;width:calc(100% - 40px)}
+
+
+/* Keep the back action visible even when the single-college detail page is scrolled. */
+.detail-only-shell .college-detail-panel>.panel-heading:first-child{position:sticky;top:68px;z-index:30;background:#fff;padding:14px 0;border-bottom:1px solid #e3eaf2}
+.detail-only-shell .detail-back-button{position:relative;z-index:40;flex-shrink:0;white-space:nowrap;cursor:pointer}
+@media(max-width:640px){
+ .detail-only-shell .college-detail-panel{width:calc(100% - 20px);margin:10px auto}
+ .detail-only-shell .college-detail-panel>.panel-heading:first-child{top:60px;align-items:flex-start;gap:10px}
+ .detail-only-shell .detail-back-button{font-size:11px;padding:8px}
+}
