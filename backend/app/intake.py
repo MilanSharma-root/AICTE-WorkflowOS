@@ -667,6 +667,35 @@ def update_stage_checklist_item(item_id: int, payload: StageChecklistUpdate, db:
                         "All required Compliance checklist items completed; moved to Final Approval for human decision.")
                     advanced_to_final_approval = True
 
+    advanced_to_completed = False
+    if application and application.current_stage == "Final Approval":
+        required_items = db.scalars(select(StageChecklistItem).where(
+            StageChecklistItem.application_id == application.id,
+            StageChecklistItem.stage == "Final Approval",
+            StageChecklistItem.required.is_(True),
+        )).all()
+        stage_complete = bool(required_items) and all(
+            row.status in {"Verified", "Not Applicable"} for row in required_items
+        )
+        if stage_complete:
+            previous_stage = application.current_stage
+            application.current_stage = "Approved / Closed"
+            application.status = "Completed"
+            application.assigned_to = None
+            db.add(WorkflowEvent(
+                application_id=application.id, from_stage=previous_stage,
+                to_stage="Approved / Closed", status="Completed", actor="system",
+                note="All required Final Approval checklist items are Verified or Not Applicable; workflow marked complete."
+            ))
+            db.add(Alert(
+                application_id=application.id, title="Application workflow completed",
+                message=f"{application.application_no} completed all required Final Approval checklist items and is now marked Completed.",
+                severity="Low", category="Workflow Completion"
+            ))
+            _audit(db, "APPLICATION_WORKFLOW_COMPLETED", "system", application.id,
+                "All required Final Approval checklist items completed; status set to Completed.")
+            advanced_to_completed = True
+
     db.commit()
     if advanced_to_final_approval:
         message = "Compliance checklist completed; application automatically moved to Final Approval."
@@ -676,7 +705,7 @@ def update_stage_checklist_item(item_id: int, payload: StageChecklistUpdate, db:
         message = "Checklist status updated."
     return {"id": item.id, "status": item.status, "updated_by": item.updated_by,
             "updated_at": item.updated_at, "advanced_to_compliance": advanced_to_compliance,
-            "advanced_to_final_approval": advanced_to_final_approval, "message": message}
+            "advanced_to_final_approval": advanced_to_final_approval, "advanced_to_completed": advanced_to_completed, "message": message}
 
 
 @router.post("/api/v1/college/documents/{document_id}/replace")
