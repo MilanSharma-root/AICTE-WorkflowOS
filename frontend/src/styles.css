@@ -247,3 +247,38 @@ tbody tr:last-child td { border-bottom: 0; }
 
 .top-signout { padding: 8px 10px; }
 @media(max-width:800px) { .top-signout { padding: 7px 8px; font-size: 10px; } }
+
+
+/* Entry selection and college portal */
+.entry-shell{min-height:100vh;display:grid;place-items:center;padding:28px;background:radial-gradient(circle at 12% 5%,#e6eff8 0,#f4f7fb 45%,#edf2f7 100%)}
+.entry-wrap{width:min(100%,850px)}
+.entry-brand{display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:46px;color:#173653}
+.entry-brand>div:last-child{display:grid;gap:4px}
+.entry-brand strong{font:800 20px Manrope,sans-serif;letter-spacing:-.4px}
+.entry-brand small{font-size:9px;letter-spacing:1.1px;color:#7b8da1}
+.entry-intro{text-align:center;margin-bottom:26px}
+.entry-eyebrow{font-size:9px;font-weight:800;letter-spacing:1.5px;color:#65819d}
+.entry-intro h1{font:800 clamp(27px,4vw,38px) Manrope,sans-serif;letter-spacing:-1px;color:#10243b;margin:12px 0}
+.entry-intro p{font-size:14px;color:#6a7c90;margin:0}
+.entry-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.entry-option{display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:13px;padding:26px;border:1px solid #dce5ef;border-radius:16px;background:#fff;box-shadow:0 10px 30px #1736530b;color:#344c65;cursor:pointer;min-height:245px}
+.entry-option:hover{border-color:#8eaccb;box-shadow:0 14px 36px #17365315;transform:translateY(-2px)}
+.entry-option-icon{display:grid;place-items:center;width:52px;height:52px;border-radius:13px;background:#edf4fb;color:#285d91}
+.entry-option strong{font:800 21px Manrope,sans-serif;color:#173653}
+.entry-option>span:not(.entry-option-icon){font-size:12px;line-height:1.7;color:#6d7e91;flex:1}
+.entry-option b{display:flex;align-items:center;gap:7px;font-size:11px;color:#285d91}
+.entry-footnote{text-align:center;color:#8795a6;font-size:10px;margin-top:22px;line-height:1.6}
+.back-link{display:block;border:0;background:transparent;color:#4d6c8c;font-size:11px;padding:0;margin-bottom:20px;cursor:pointer}
+.college-portal-card{width:min(100%,560px)}
+.college-form{display:grid;gap:13px}
+.college-form label{display:grid;gap:6px;font-size:11px;font-weight:700;color:#52677e}
+.college-form input,.college-form select{width:100%;border:1px solid #dce5ef;border-radius:8px;padding:11px;background:#fff;color:#2f455d;font:12px 'DM Sans',sans-serif}
+.college-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.college-success{text-align:center;padding:18px 0 4px;color:#28734f}
+.college-success h1{color:#173653;font:800 25px Manrope,sans-serif;margin:12px 0 8px}
+.college-success p{font-size:12px;line-height:1.7;color:#687b90}
+.application-reference{display:grid;gap:8px;text-align:left;padding:16px;border:1px solid #dce8f2;border-radius:10px;background:#f7fafc;margin:18px 0}
+.application-reference small{font-size:9px;letter-spacing:1px;color:#7b8da1;font-weight:800}
+.application-reference strong{font:800 19px Manrope,sans-serif;color:#173653;overflow-wrap:anywhere}
+.application-reference span{font-size:11px;color:#5d7188}
+@media(max-width:620px){.entry-shell{padding:20px}.entry-brand{margin-bottom:32px}.entry-options{grid-template-columns:1fr}.entry-option{min-height:190px;padding:21px}.college-form-grid{grid-template-columns:1fr}}
