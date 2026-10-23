@@ -358,6 +358,25 @@ def list_applications(q: str | None = None, status: str | None = None, stage: st
     if stage and stage != "All": stmt = stmt.where(Application.current_stage == stage)
     return list(db.scalars(stmt).all())
 
+@app.post("/api/v1/public/applications", response_model=ApplicationOut, status_code=201)
+def create_public_application(payload: ApplicationCreate, db: Session = Depends(get_db)):
+    """Prototype college intake. Public submissions are queued for authorised human review."""
+    now = utcnow()
+    application = Application(
+        application_no=f"AICTE-{now:%Y%m%d%H%M%S}-{uuid4().hex[:4].upper()}",
+        institution_name=payload.institution_name, institution_type=payload.institution_type,
+        state=payload.state, application_type=payload.application_type,
+        current_stage="Application Intake", priority="Normal", assigned_to=None,
+        due_date=None, notes=payload.notes, status="Pending"
+    )
+    db.add(application); db.flush()
+    db.add(WorkflowEvent(application_id=application.id, from_stage=None, to_stage=application.current_stage,
+                         status=application.status, actor="College Portal", note="Public college application submitted; awaiting authorised manual review"))
+    audit(db, "PUBLIC_APPLICATION_SUBMITTED", "College Portal", application.id,
+          f"Application {application.application_no} submitted through the college portal")
+    db.commit(); db.refresh(application)
+    return application
+
 @app.post("/api/v1/applications", response_model=ApplicationOut, status_code=201)
 def create_application(payload: ApplicationCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer"))):
     now = utcnow()
