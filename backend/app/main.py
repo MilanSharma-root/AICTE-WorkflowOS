@@ -136,8 +136,13 @@ def audit(db: Session, action: str, actor: str, application_id: int | None = Non
     db.add(AuditEvent(application_id=application_id, action=action, actor=actor, details=details))
 
 def seed_demo_data(db: Session):
-    """Create demo login accounts only; application records must come from actual submissions."""
-    if db.scalar(select(func.count()).select_from(User)):
+    """Seed local demo accounts only; never create synthetic application records."""
+    if settings.app_env.strip().lower() in {"prod", "production"}:
+        return
+    existing_users = {row.username for row in db.scalars(select(User)).all()}
+    # Upgrade an existing local demo database with the new stage-role accounts, but
+    # do not seed credentials into a database that does not use the known demo admin.
+    if existing_users and "admin@demo.local" not in existing_users:
         return
     demo_users = [
         ("admin@demo.local", "Demo Administrator", "admin"),
@@ -151,7 +156,8 @@ def seed_demo_data(db: Session):
         ("final.approval@demo.local", "Final Approval Officer", "final_approval_officer"),
     ]
     for username, full_name, role in demo_users:
-        db.add(User(username=username, full_name=full_name, role=role, password_hash=hash_password("Demo@12345")))
+        if username not in existing_users:
+            db.add(User(username=username, full_name=full_name, role=role, password_hash=hash_password("Demo@12345")))
     db.commit()
 
 @asynccontextmanager
