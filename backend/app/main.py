@@ -488,11 +488,26 @@ def run_compliance_automation(db: Session = Depends(get_db),
                 due = validity.renewal_due_date or validity.expiry_date
                 expired = bool(validity.expiry_date and safe_dt(validity.expiry_date) < utcnow())
                 renewal_due = bool(validity.renewal_due_date and safe_dt(validity.renewal_due_date) < utcnow())
-                if expired or renewal_due or validity.status.lower() in {"expired", "expiring", "renewal due"}:
-                    label = "Expired document" if expired or validity.status.lower() == "expired" else "Document renewal due"
+                expiring_soon = bool(validity.expiry_date and utcnow() <= safe_dt(validity.expiry_date) <= utcnow() + timedelta(days=30))
+                if expired or renewal_due or expiring_soon or validity.status.lower() in {"expired", "expiring", "renewal due"}:
+                    label = "Expired document" if expired or validity.status.lower() == "expired" else ("Document expiring within 30 days" if expiring_soon else "Document renewal due")
                     issue(app, f"{label}: {validity.document_name}", "Document Validity",
                         f"Recorded validity metadata: status={validity.status}; expiry={validity.expiry_date}; renewal due={validity.renewal_due_date}. Confirm source record before taking action.",
                         due=due, source_id=validity.id)
+
+            # Only turn explicit, non-template committee-condition notes into tasks.
+            condition_rows = db.scalars(select(StageChecklistItem).where(
+                StageChecklistItem.application_id == app.id,
+                StageChecklistItem.stage == "Compliance",
+                StageChecklistItem.required.is_(True),
+                StageChecklistItem.status.not_in(["Verified", "Not Applicable"]))).all()
+            for condition in condition_rows:
+                note = (condition.notes or "").strip()
+                if not note or note.lower().startswith("default workflow task"):
+                    continue
+                issue(app, f"Approval condition: {condition.title}", "Approval Condition",
+                    f"Recorded committee condition / officer note: {note}. No deadline is assigned because the source record has no due date.",
+                    source_id=condition.id)
 
             for undertaking in db.scalars(select(Undertaking).where(Undertaking.application_id == app.id, Undertaking.submitted.is_(False))).all():
                 issue(app, f"Pending undertaking: {undertaking.title}", "Undertaking",
