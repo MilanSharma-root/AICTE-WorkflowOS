@@ -49,6 +49,16 @@ class ComplianceItem(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+class ComplianceStatusHistory(Base):
+    __tablename__ = "compliance_status_history"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    compliance_item_id: Mapped[int] = mapped_column(ForeignKey("compliance_items.id"), index=True)
+    from_status: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    to_status: Mapped[str] = mapped_column(String(60))
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    changed_by: Mapped[str] = mapped_column(String(160))
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
 class Undertaking(Base):
     __tablename__ = "undertakings"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
