@@ -39,6 +39,11 @@ All prototype accounts use `Demo@12345`:
 - `officer@demo.local` — register applications, schedule EVC, track compliance and undertakings.
 - `reviewer@demo.local` — record workflow transitions and compliance review.
 - `auditor@demo.local` — read-only access and audit trail.
+- `scrutiny@demo.local` — Scrutiny and re-scrutiny queue.
+- `evc@demo.local` — EVC queue and visit status updates.
+- `sac.shc@demo.local` — SAC/SHC review queue.
+- `compliance@demo.local` — Compliance queue and checklists.
+- `final.approval@demo.local` — final approval queue (authorised closure only).
 
 These are public demo credentials. Do not use them for a deployed or real-data environment. Set a long random `SECRET_KEY`, create proper users/passwords, configure HTTPS, backups, retention, access controls and secure storage before any deployment.
 
@@ -52,10 +57,10 @@ Uploaded files are stored under `backend/storage/documents` by default and requi
 
 ## Important limitations
 
-- Seeded records are synthetic demonstration data, not real institutional applications.
+- Fresh databases seed demo login accounts only; application records are created from actual portal submissions or authorised staff entry. Existing local databases may still contain records created by earlier prototype versions.
 - Workflow stages are illustrative and configurable, but must be validated against the applicable AICTE Approval Process Handbook (APH), official circulars, jurisdiction and competent-authority rules.
 - The risk score is an explainable prioritisation aid, not an AICTE decision, compliance finding, or substitute for expert review.
-- Email/SMS delivery, eOffice/ERP integration, Aadhaar/digital-signature integration, production-grade identity federation, antivirus scanning, encrypted object storage, migrations and deployment hardening are not enabled by this local prototype. The rule-based document pre-scrutiny checks only whether a document record exists; it does not read, authenticate, or judge the contents of a file.
+- SMTP correction emails are sent only when SMTP_HOST and SMTP_FROM are configured; SMTP_USERNAME, SMTP_PASSWORD, SMTP_PORT, SMTP_USE_TLS and SMTP_USE_SSL control transport/authentication. SMS delivery, eOffice/ERP integration, Aadhaar/digital-signature integration, production-grade identity federation, antivirus scanning, encrypted object storage and deployment hardening are not enabled. Image checks use resolution/blur heuristics without OCR; PDF checks inspect extractable text and simple institution/date/reference signals. These checks can miss errors and must never be treated as authenticity verification or official compliance findings.
 - Statutory approvals, rejections, EVC outcomes and committee decisions remain under authorised human control. Do not load sensitive personal or institutional documents until security and retention controls are reviewed.
 
 ## Document validity API
@@ -66,6 +71,15 @@ Uploaded files are stored under `backend/storage/documents` by default and requi
 - Expiry monitoring creates in-app alerts within 30 days, with higher severity within 7 days and for expired records. Alert creation is not a legal determination; staff must verify the record and applicable requirements.
 - These APIs extend the prototype database schema; `create_all` creates the new table for fresh/local databases. Existing installations should back up the database before updating.
 
+
+## College intake and document checks
+
+- The College option creates an institutional account and application together. All three required upload slots must be supplied: Institution Registration / Approval Proof, Land / Building Evidence, and Faculty / Infrastructure Details. Accepted formats are PDF, PNG and JPEG; the existing configured upload-size limit applies to each file.
+- Colleges can sign in with the email/password created during submission, view only their linked application, and replace a flagged document. Application and document metadata are stored in the configured shared database; file bytes are stored in the configured upload directory, so multi-device use requires a shared/durable database and shared/durable file storage.
+- Automated checks flag empty/invalid files, low-resolution or blurred images, PDFs with little/no extractable text, and simple missing institution/date/reference signals where text can be extracted. Image text is not OCR-verified. Manual review remains required.
+- Correction email delivery is conditional on SMTP environment variables. If SMTP is not configured or delivery fails, the application receives an in-app alert and the audit trail records the delivery outcome; the system does not claim an email was sent.
+- A stage officer can choose Stage Completed while the current stage is selected. The backend routes to the next configured stage only if that role is authorised and required checklist items / document correction blockers are clear. Final approval requires the final-approval role (or an existing admin/reviewer account).
+- New tables (college_profiles, document_quality_checks, stage_checklist_items) are created by the existing SQLAlchemy create_all startup path. No existing application/user columns were changed. Back up the database before upgrading an existing installation.
 ## APH workflow safeguards
 
 The prototype's workflow configuration is an administrative configuration aid, not a substitute for a legally approved APH rule engine. The 2024–2027 APH describes different processing paths by application category (see Table 2.3 and the relevant clauses), so an operator must validate the selected route and deadlines with authorised AICTE officials before operational use.
