@@ -177,3 +177,17 @@ class DocumentQualityCheck(Base):
     status: Mapped[str] = mapped_column(String(40), default="Needs Review")
     findings_json: Mapped[str] = mapped_column(Text, default="[]")
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class StageChecklistItem(Base):
+    __tablename__ = "stage_checklist_items"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id"), index=True)
+    stage: Mapped[str] = mapped_column(String(100), index=True)
+    title: Mapped[str] = mapped_column(String(240))
+    required: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(40), default="Pending")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_by: Mapped[str] = mapped_column(String(160), default="system")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
