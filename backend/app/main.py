@@ -418,6 +418,48 @@ def get_application(application_id: int, db: Session = Depends(get_db), user: Us
     if not item: raise HTTPException(404, "Application not found")
     return item
 
+@app.delete("/api/v1/applications/{application_id}", status_code=204)
+def delete_application(application_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles("admin"))):
+    """Permanently remove an application and its application-scoped records.
+    Restricted to admins; preserve a detached audit entry for the deletion itself.
+    """
+    item = db.get(Application, application_id)
+    if not item:
+        raise HTTPException(404, "Application not found")
+
+    application_no = item.application_no
+    institution_name = item.institution_name
+    document_rows = db.scalars(select(DocumentRecord).where(
+        DocumentRecord.application_id == item.id
+    )).all()
+    for document in document_rows:
+        stored_path = Path(settings.upload_dir) / document.storage_key
+        try:
+            if stored_path.exists() and stored_path.is_file():
+                stored_path.unlink()
+        except OSError:
+            # Do not abort database cleanup because a local file is unavailable.
+            pass
+
+    # Remove child records first to satisfy foreign-key constraints.
+    for model in (ApplicationDocumentCheck, DocumentQualityCheck, DocumentValidity,
+                  StageChecklistItem, EVCVisit, ComplianceItem, Undertaking,
+                  DocumentRecord, WorkflowEvent, Alert, CollegeProfile):
+        db.query(model).filter(model.application_id == item.id).delete(synchronize_session=False) if model is not CollegeProfile else None
+
+    # CollegeProfile is keyed by its linked application but does not use the same
+    # column name as the other application-scoped records.
+    db.query(CollegeProfile).filter(CollegeProfile.application_id == item.id).delete(synchronize_session=False)
+    db.query(AuditEvent).filter(AuditEvent.application_id == item.id).delete(synchronize_session=False)
+    db.add(AuditEvent(
+        application_id=None, action="APPLICATION_DELETED", actor=user.full_name,
+        details=f"Deleted {application_no} — {institution_name} (application id {item.id}) by admin.",
+    ))
+    db.delete(item)
+    db.commit()
+    return None
+
+
 @app.patch("/api/v1/applications/{application_id}", response_model=ApplicationOut)
 def update_application(application_id: int, payload: ApplicationUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer"))):
     item = db.get(Application, application_id)
