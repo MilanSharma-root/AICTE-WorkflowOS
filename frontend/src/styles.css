@@ -282,3 +282,58 @@ tbody tr:last-child td { border-bottom: 0; }
 .application-reference strong{font:800 19px Manrope,sans-serif;color:#173653;overflow-wrap:anywhere}
 .application-reference span{font-size:11px;color:#5d7188}
 @media(max-width:620px){.entry-shell{padding:20px}.entry-brand{margin-bottom:32px}.entry-options{grid-template-columns:1fr}.entry-option{min-height:190px;padding:21px}.college-form-grid{grid-template-columns:1fr}}
+
+/* College intake and application detail views */
+.required-documents{display:grid;gap:11px;border:1px solid #e0e8f2;background:#f8fbff;border-radius:10px;padding:14px}
+.required-documents h2{font:800 13px Manrope,sans-serif;color:#203a57;margin:0}
+.required-documents label{display:grid;gap:7px;font-size:11px;font-weight:700;color:#52647a}
+.required-documents input[type=file]{width:100%;padding:8px;border:1px dashed #b9c9dc;border-radius:7px;background:#fff;font-size:10px}
+.required-documents small{font-size:10px;color:#8190a2;line-height:1.5}
+.college-dashboard-shell{align-items:start;padding:28px}
+.college-dashboard{width:min(100%,1000px);display:grid;gap:18px}
+.college-dashboard>.login-brand{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:18px;box-shadow:0 10px 30px #142c4608}
+.college-dashboard>.login-brand .secondary-button{margin-left:auto}
+.college-dashboard-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:24px}
+.college-dashboard-heading h1{font:800 25px Manrope,sans-serif;color:#1b3048;margin:8px 0}
+.college-dashboard-heading p{font-size:12px;color:#8190a2;margin:0}
+.college-summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.college-summary-grid>div{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;display:grid;gap:7px}
+.college-summary-grid small,.college-detail-summary small{font-size:10px;color:#8190a2}
+.college-summary-grid strong,.college-detail-summary strong{font-size:12px;color:#30445b}
+.college-documents{padding:0 18px}
+.college-document,.quality-row{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:15px 0;border-bottom:1px solid #edf1f6}
+.college-document:last-child,.quality-row:last-child{border-bottom:0}
+.college-document>div,.quality-row>div{display:grid;gap:5px;min-width:0}
+.college-document strong,.quality-row strong{font-size:11px;color:#30445b}
+.college-document small,.quality-row small,.detail-history-row small{font-size:10px;color:#8795a6}
+.document-finding,.quality-row p,.detail-history-row p{font-size:11px;line-height:1.5;color:#b54c49;margin:3px 0 0;white-space:normal}
+.college-detail-panel{margin:0 0 18px;overflow:hidden}
+.college-detail-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border-bottom:1px solid #edf1f6}
+.college-detail-summary>div{display:grid;gap:7px;padding:15px 18px;border-right:1px solid #edf1f6;border-bottom:1px solid #edf1f6;min-width:0}
+.college-detail-summary strong{overflow-wrap:anywhere}
+.detail-subheading{background:#fbfcfe}
+.workflow-vertical{padding:20px 24px 22px;display:grid;gap:0}
+.workflow-step{position:relative;display:flex;align-items:center;gap:14px;min-height:62px}
+.workflow-step:not(:last-child):before{content:"";position:absolute;left:16px;top:37px;height:27px;width:2px;background:#dce3ec}
+.workflow-step.done:not(:last-child):before{background:#45a77d}
+.workflow-circle{height:34px;width:34px;border-radius:50%;border:2px solid #cbd5e1;background:#f1f4f8;color:#8290a2;display:grid;place-items:center;flex-shrink:0;font-size:12px;font-weight:800;z-index:1}
+.workflow-step-copy{display:grid;gap:4px}
+.workflow-step-copy strong{font-size:12px;color:#33475e}
+.workflow-step-copy small{font-size:10px;color:#8a97a7}
+.workflow-step.done .workflow-circle{background:#e6f6ee;border-color:#39a575;color:#22885d}
+.workflow-step.done .workflow-step-copy strong{color:#267b59}
+.workflow-step.active .workflow-circle{background:#e9f2ff;border-color:#4c83cc;color:#3269ac;box-shadow:0 0 0 4px #e9f2ff}
+.workflow-step.active .workflow-step-copy strong{color:#3269ac}
+.workflow-step.blocked .workflow-circle{background:#fff0ef;border-color:#d75c56;color:#c34c48}
+.workflow-step.blocked .workflow-step-copy strong,.workflow-step.blocked .workflow-step-copy small{color:#c34c48}
+.detail-columns{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:0 14px 16px}
+.detail-columns>section{border:1px solid #edf1f6;border-radius:9px;min-width:0;overflow:hidden}
+.detail-columns .panel-heading{padding:14px}
+.quality-row,.detail-history-row{padding:13px 14px}
+.detail-history-row{display:grid;gap:5px;border-bottom:1px solid #edf1f6}
+.detail-history-row:last-child{border-bottom:0}
+.detail-history-row strong{font-size:11px;color:#34485f}
+.table-actions{display:flex;gap:6px;align-items:center}
+.table-actions .secondary-button{padding:7px 9px}
+@media(max-width:800px){.college-dashboard-shell{padding:14px}.college-dashboard-heading{align-items:flex-start;flex-direction:column}.college-summary-grid,.college-detail-summary{grid-template-columns:1fr 1fr}.detail-columns{grid-template-columns:1fr}.workflow-vertical{padding:16px}.college-dashboard>.login-brand{flex-wrap:wrap}}
+@media(max-width:480px){.college-summary-grid,.college-detail-summary{grid-template-columns:1fr}.college-detail-summary>div{border-right:0}.college-document{flex-direction:column}.table-actions{flex-direction:column;align-items:stretch}}
