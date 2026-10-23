@@ -54,22 +54,23 @@ def stages_for_application(db: Session, application_type: str) -> list[str]:
 
 
 def seed_demo_documents(db: Session, application: Application, uploaded_by: str) -> None:
-    """Create clearly-labelled synthetic PDF samples for prototype document review."""
+    """Create synthetic demo PDFs matching the four SAC/SHC checklist items."""
     from io import BytesIO
     from reportlab.pdfgen import canvas
     slots = [
-        ("Institution Approval Letter", "DEMO-IAL-001"),
-        ("Land / Building Documents", "DEMO-LBD-002"),
-        ("Faculty / Infrastructure Details", "DEMO-FID-003"),
+        ("Review EVC report and findings", "DEMO-EVC-001"),
+        ("Review facilities, faculty and infrastructure observations", "DEMO-FAC-002"),
+        ("Record committee recommendation and rationale", "DEMO-REC-003"),
+        ("Confirm any conditions or compliance items required", "DEMO-COMP-004"),
     ]
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
     for slot, reference in slots:
         buffer = BytesIO()
         pdf = canvas.Canvas(buffer)
-        pdf.setFont("Helvetica-Bold", 15)
+        pdf.setFont("Helvetica-Bold", 14)
         pdf.drawString(48, 790, "SYNTHETIC DEMO DOCUMENT")
-        pdf.setFont("Helvetica", 11)
+        pdf.setFont("Helvetica", 10)
         lines = [slot, f"Institution: {application.institution_name}", f"Application: {application.application_no}", f"Reference: {reference}", "NOT an official AICTE record. For prototype review only."]
         y = 750
         for line in lines:
@@ -79,10 +80,12 @@ def seed_demo_documents(db: Session, application: Application, uploaded_by: str)
         payload = buffer.getvalue()
         storage_key = uuid4().hex + ".pdf"
         (upload_dir / storage_key).write_bytes(payload)
-        record = DocumentRecord(application_id=application.id, original_name=f"DEMO - {slot}.pdf", storage_key=storage_key, content_type="application/pdf", size_bytes=len(payload), uploaded_by=uploaded_by)
+        record = DocumentRecord(application_id=application.id, original_name=f"DEMO - {slot}.pdf",
+            storage_key=storage_key, content_type="application/pdf", size_bytes=len(payload), uploaded_by=uploaded_by)
         db.add(record)
         db.flush()
-        db.add(DocumentQualityCheck(document_id=record.id, application_id=application.id, slot_name=slot, status="Needs Review", findings_json=json.dumps(["Synthetic sample attached automatically; open and inspect before marking correct."])))
+        db.add(DocumentQualityCheck(document_id=record.id, application_id=application.id, slot_name=slot,
+            status="Needs Review", findings_json=json.dumps(["Synthetic demo sample; open and review before verifying the related checklist item."])))
 
 def sync_deadline_alerts(db: Session):
     now = utcnow()
