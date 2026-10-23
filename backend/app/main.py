@@ -294,11 +294,45 @@ def run_workflow_automation(db: Session = Depends(get_db), user: User = Depends(
     assigned = 0
     alerts_created = 0
     checks = []
+    stage_role_map = {
+        "Application Intake": "scrutiny_officer",
+        "Scrutiny": "scrutiny_officer",
+        "Re-scrutiny": "scrutiny_officer",
+        "Returned to Institution": "scrutiny_officer",
+        "EVC Scheduling": "evc_officer",
+        "EVC Visit": "evc_officer",
+        "SAC/SHC Review": "sac_shc_officer",
+        "Compliance": "compliance_officer",
+        "Final Approval": "final_approval_officer",
+    }
     for item in open_apps:
         if not (item.assigned_to or "").strip():
-            item.assigned_to = user.full_name
-            assigned += 1
-            audit(db, "AUTOMATION_CASE_ASSIGNED", user.full_name, item.id, "Assigned unowned case to the operator running the automation.")
+            target_role = stage_role_map.get(item.current_stage)
+            target_user = db.scalar(
+                select(User).where(User.role == target_role, User.active.is_(True)).order_by(User.id)
+            ) if target_role else None
+            if target_user:
+                item.assigned_to = target_user.full_name
+                assigned += 1
+                audit(
+                    db, "AUTOMATION_CASE_ASSIGNED", user.full_name, item.id,
+                    f"Routed case to active stage owner {target_user.username} for stage {item.current_stage}.",
+                )
+            else:
+                title = "Workflow assignment requires configuration"
+                exists = db.scalar(select(Alert.id).where(
+                    Alert.application_id == item.id,
+                    Alert.category == "Automation",
+                    Alert.title == title,
+                    Alert.acknowledged.is_(False),
+                ))
+                if not exists:
+                    db.add(Alert(
+                        application_id=item.id, title=title,
+                        message=f"{item.application_no}: no active authorised user is configured for stage '{item.current_stage}'. An administrator must configure the stage owner; the case was left unassigned.",
+                        severity="High", category="Automation",
+                    ))
+                    alerts_created += 1
         has_document = db.scalar(select(DocumentRecord.id).where(DocumentRecord.application_id == item.id).limit(1)) is not None
         if not has_document:
             title = "Pre-scrutiny: no document records"
