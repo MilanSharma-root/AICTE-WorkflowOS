@@ -546,17 +546,31 @@ def _automation_task(db: Session, application: Application, title: str, category
         ComplianceItem.application_id == application.id, ComplianceItem.title == title))
     if existing:
         changed = False
-        # Preserve officer verification decisions; only refresh unresolved deadline status.
-        if existing.status not in {"Compliant", "Non-Compliant"} and due_date and existing.due_date != due_date:
-            existing.due_date = due_date
-            changed = True
-        if existing.status not in {"Compliant", "Non-Compliant"} and existing.due_date and safe_dt(existing.due_date) < utcnow() and existing.status != "Overdue":
-            previous = existing.status
-            existing.status = "Overdue"
-            existing.updated_at = utcnow()
-            db.add(ComplianceStatusHistory(compliance_item_id=existing.id, from_status=previous, to_status="Overdue",
-                note="Automatically marked overdue; source deadline has passed.", changed_by="system"))
-            changed = True
+        # Never overwrite a human's final determination. Keep unresolved findings actionable
+        # by refreshing their evidence note, category, deadline and officer assignment.
+        final_status = existing.status in {"Compliant", "Non-Compliant", "Verified"}
+        if not final_status:
+            if existing.category != category:
+                existing.category = category
+                changed = True
+            if notes and existing.notes != notes:
+                existing.notes = notes
+                changed = True
+            if due_date and existing.due_date != due_date:
+                existing.due_date = due_date
+                changed = True
+            if assigned_to and existing.assigned_to != assigned_to:
+                existing.assigned_to = assigned_to
+                changed = True
+            elif not existing.assigned_to and application.assigned_to:
+                existing.assigned_to = application.assigned_to
+                changed = True
+            if existing.due_date and safe_dt(existing.due_date) < utcnow() and existing.status != "Overdue":
+                previous = existing.status
+                existing.status = "Overdue"
+                db.add(ComplianceStatusHistory(compliance_item_id=existing.id, from_status=previous, to_status="Overdue",
+                    note="Automatically marked overdue; source deadline has passed.", changed_by="system"))
+                changed = True
         if changed:
             existing.updated_at = utcnow()
         return ("updated" if changed else "skipped"), existing
@@ -608,7 +622,7 @@ def run_compliance_automation(db: Session = Depends(get_db),
                 "institution_name": app.institution_name, "requirement": title,
                 "category": category, "detail": detail, "source_id": source_id}
             stats["issues"].append(entry)
-            outcome, task = _automation_task(db, app, title, category, due, detail)
+            outcome, task = _automation_task(db, app, title, category, due, detail, user.full_name if user.role == "compliance_officer" else None)
             stats["tasks_created" if outcome == "created" else "tasks_updated" if outcome == "updated" else "tasks_skipped"] += 1
             if outcome == "created":
                 db.add(Alert(application_id=app.id, title="Compliance task generated",
