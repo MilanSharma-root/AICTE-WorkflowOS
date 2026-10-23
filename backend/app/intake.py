@@ -314,6 +314,8 @@ def create_stage_checklist_item(application_id: int, payload: StageChecklistCrea
         raise HTTPException(404, "Application not found")
     if user.role not in {"admin", "officer"} and user.role != _stage_role(payload.stage):
         raise HTTPException(403, "Only an authorised officer for this stage may add checklist items")
+    if user.role not in {"admin", "officer"} and application.current_stage != payload.stage and not (payload.stage == "Final Approval" and application.current_stage == "Compliance"):
+        raise HTTPException(403, "Stage officers may add checklist items only for their current stage.")
     item = StageChecklistItem(application_id=application_id, stage=payload.stage, title=payload.title.strip(),
                               required=payload.required, status="Pending", notes=payload.notes, updated_by=user.full_name)
     db.add(item)
@@ -332,6 +334,9 @@ def update_stage_checklist_item(item_id: int, payload: StageChecklistUpdate, db:
         raise HTTPException(404, "Stage checklist item not found")
     if user.role not in {"admin", "reviewer"} and user.role != _stage_role(item.stage):
         raise HTTPException(403, "Your role cannot update this stage checklist")
+    application = db.get(Application, item.application_id)
+    if user.role not in {"admin", "reviewer"} and (not application or (application.current_stage != item.stage and not (item.stage == "Final Approval" and application.current_stage == "Compliance"))):
+        raise HTTPException(403, "Stage officers may update checklist items only for their current stage.")
     if payload.status not in {"Pending", "Verified", "Blocked", "Not Applicable"}:
         raise HTTPException(422, "Status must be Pending, Verified, Blocked or Not Applicable")
     if payload.status == "Blocked" and not (payload.notes or item.notes or "").strip():
