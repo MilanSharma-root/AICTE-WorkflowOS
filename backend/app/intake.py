@@ -17,7 +17,7 @@ from pypdf import PdfReader
 
 from app.config import settings
 from app.database import get_db
-from app.models import Alert, Application, AuditEvent, CollegeProfile, DocumentQualityCheck, DocumentRecord, StageChecklistItem, User, WorkflowEvent
+from app.models import Alert, Application, AuditEvent, CollegeProfile, DocumentQualityCheck, DocumentRecord, EVCVisit, StageChecklistItem, User, WorkflowEvent, ApplicationWorkflowRoute, WorkflowConfiguration
 from app.security import current_user, hash_password
 
 router = APIRouter()
@@ -377,6 +377,7 @@ def review_application_document(
     ).order_by(DocumentQualityCheck.id)).all()
     all_verified = len(checks) == 3 and all(item.status == "Verified" for item in checks)
     advanced = False
+    advanced_to_evc = False
     if all_verified and application.current_stage in {"Application Intake", "Returned to Institution"}:
         previous_stage = application.current_stage
         application.current_stage = "Scrutiny"
@@ -399,10 +400,60 @@ def review_application_document(
         _audit(db, "INTAKE_DOCUMENTS_VERIFIED_AND_ROUTED", "system", application_id,
                "All three required documents were marked correct; routed to Scrutiny.")
         advanced = True
+
+    # When scrutiny verifies all three required college documents, hand off
+    # automatically to EVC Scheduling; no manual transition form is needed.
+    if all_verified and application.current_stage in {"Scrutiny", "Re-scrutiny"}:
+        route = db.scalar(select(ApplicationWorkflowRoute).where(
+            ApplicationWorkflowRoute.application_type == application.application_type,
+            ApplicationWorkflowRoute.active.is_(True)
+        ))
+        config = db.scalar(select(WorkflowConfiguration).where(
+            WorkflowConfiguration.active.is_(True)
+        ).order_by(WorkflowConfiguration.updated_at.desc()))
+        try:
+            configured_stages = json.loads(route.stages_json) if route else (json.loads(config.stages_json) if config else [])
+        except (ValueError, TypeError):
+            configured_stages = []
+        operational_stages = [str(stage) for stage in configured_stages
+                              if stage not in {"Re-scrutiny", "Returned to Institution", "Approved / Closed", "Rejected"}]
+        scrutiny_stage = "Scrutiny" if application.current_stage == "Re-scrutiny" else application.current_stage
+        if scrutiny_stage in operational_stages:
+            idx = operational_stages.index(scrutiny_stage)
+            if idx + 1 < len(operational_stages) and operational_stages[idx + 1] == "EVC Scheduling":
+                previous_stage = application.current_stage
+                application.current_stage = "EVC Scheduling"
+                application.status = "In Review"
+                evc_officer = db.scalar(select(User).where(
+                    User.role == "evc_officer", User.active.is_(True)
+                ).order_by(User.id))
+                application.assigned_to = evc_officer.full_name if evc_officer else None
+                existing_visit = db.scalar(select(EVCVisit.id).where(
+                    EVCVisit.application_id == application_id,
+                    EVCVisit.status.not_in(["Completed", "Cancelled"])
+                ).limit(1))
+                if not existing_visit:
+                    db.add(EVCVisit(application_id=application_id, proposed_date=None,
+                                    location="Institution campus", panel_members=None, status="Proposed"))
+                db.add(WorkflowEvent(application_id=application_id, from_stage=previous_stage,
+                                     to_stage="EVC Scheduling", status="In Review", actor="system",
+                                     note="All three required documents verified by the scrutiny officer; automatically routed to EVC Scheduling. Visit date and panel remain pending."))
+                _audit(db, "AUTOMATIC_EVC_HANDOFF", "system", application_id,
+                       f"All three documents verified; moved from {previous_stage} to EVC Scheduling.")
+                db.add(Alert(application_id=application_id, title="Application handed off to EVC",
+                             message=f"{application.application_no} passed scrutiny document verification and is now in EVC Scheduling.",
+                             severity="Medium", category="Workflow Handoff"))
+                advanced_to_evc = True
     db.commit()
+    if advanced_to_evc:
+        message = "All three documents verified; application automatically moved to EVC Scheduling."
+    elif advanced:
+        message = "All three documents verified; application moved to Scrutiny."
+    else:
+        message = "Document verified."
     return {"document_id": document_id, "status": check.status, "application_status": application.status,
             "all_documents_verified": all_verified, "advanced_to_scrutiny": advanced,
-            "message": "Document verified." if not advanced else "All three documents verified; application moved to Scrutiny."}
+            "advanced_to_evc": advanced_to_evc, "message": message}
 
 
 @router.get("/api/v1/applications/{application_id}/document-quality")
