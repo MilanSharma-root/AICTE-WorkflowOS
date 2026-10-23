@@ -135,6 +135,32 @@ def safe_dt(value):
 def audit(db: Session, action: str, actor: str, application_id: int | None = None, details: str | None = None):
     db.add(AuditEvent(application_id=application_id, action=action, actor=actor, details=details))
 
+def ensure_stage_checklist(db: Session, application: Application, stage: str):
+    """Create actionable review items when an application first reaches a workflow stage."""
+    templates = {
+        "SAC/SHC Review": [
+            ("Review EVC report and findings", True),
+            ("Review facilities, faculty and infrastructure observations", True),
+            ("Record committee recommendation and rationale", True),
+            ("Confirm any conditions or compliance items required", True),
+        ],
+        "Compliance": [
+            ("Record each committee condition requiring compliance", True),
+            ("Verify evidence submitted against each condition", True),
+            ("Record compliance recommendation for authorised review", True),
+        ],
+    }
+    existing = {row.title for row in db.scalars(select(StageChecklistItem).where(
+        StageChecklistItem.application_id == application.id,
+        StageChecklistItem.stage == stage,
+    )).all()}
+    for title, required in templates.get(stage, []):
+        if title not in existing:
+            db.add(StageChecklistItem(application_id=application.id, stage=stage, title=title,
+                                      required=required, status="Pending",
+                                      notes="Default workflow task; verify against applicable official requirements.",
+                                      updated_by="system"))
+
 def seed_demo_data(db: Session):
     """Seed local demo accounts only; never create synthetic application records."""
     if settings.app_env.strip().lower() in {"prod", "production"}:
@@ -617,6 +643,7 @@ def transition_application(application_id: int, payload: TransitionIn, db: Sessi
     old_stage = item.current_stage
     item.current_stage = payload.to_stage
     item.status = "Completed" if payload.to_stage == "Approved / Closed" else ("Rejected" if payload.to_stage == "Rejected" else ("Returned" if payload.to_stage == "Returned to Institution" else payload.status))
+    ensure_stage_checklist(db, item, item.current_stage)
 
     # End-to-end routing: after an authorised transition, route the open case to
     # the active owner of its new stage and create a deduplicated in-app handoff.
@@ -871,6 +898,7 @@ def update_evc(visit_id: int, payload: EVCVisitUpdate, db: Session = Depends(get
         if not already_handed_off:
             app_item.current_stage = next_stage
             app_item.status = "In Review"
+            ensure_stage_checklist(db, app_item, next_stage)
             next_stage_roles = {
                 "Application Intake": "scrutiny_officer", "Scrutiny": "scrutiny_officer",
                 "Re-scrutiny": "scrutiny_officer", "EVC Scheduling": "evc_officer",
