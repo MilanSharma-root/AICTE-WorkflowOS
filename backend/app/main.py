@@ -54,9 +54,7 @@ def stages_for_application(db: Session, application_type: str) -> list[str]:
 
 
 def seed_demo_documents(db: Session, application: Application, uploaded_by: str) -> None:
-    """Create synthetic demo PDFs matching the four SAC/SHC checklist items."""
-    from io import BytesIO
-    from reportlab.pdfgen import canvas
+    """Create four clearly-labelled synthetic PDF samples without extra dependencies."""
     slots = [
         ("Review EVC report and findings", "DEMO-EVC-001"),
         ("Review facilities, faculty and infrastructure observations", "DEMO-FAC-002"),
@@ -66,24 +64,40 @@ def seed_demo_documents(db: Session, application: Application, uploaded_by: str)
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
     for slot, reference in slots:
-        buffer = BytesIO()
-        pdf = canvas.Canvas(buffer)
-        pdf.setFont("Helvetica-Bold", 14)
-        pdf.drawString(48, 790, "SYNTHETIC DEMO DOCUMENT")
-        pdf.setFont("Helvetica", 10)
-        lines = [slot, f"Institution: {application.institution_name}", f"Application: {application.application_no}", f"Reference: {reference}", "NOT an official AICTE record. For prototype review only."]
-        y = 750
-        for line in lines:
-            pdf.drawString(48, y, line[:100])
-            y -= 28
-        pdf.save()
-        payload = buffer.getvalue()
+        lines = ["SYNTHETIC DEMO DOCUMENT", slot, f"Institution: {application.institution_name}",
+                 f"Application: {application.application_no}", f"Reference: {reference}",
+                 "NOT an official AICTE record. For prototype review only."]
+        def esc(value: str) -> str:
+            return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")[:110]
+        commands = ["BT", "/F1 12 Tf", "50 790 Td"]
+        for index, line in enumerate(lines):
+            if index:
+                commands.append("0 -28 Td")
+            commands.append(f"({esc(line)}) Tj")
+        commands.append("ET")
+        stream = "\n".join(commands).encode("latin-1", "replace")
+        objects = [
+            b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+        ]
+        payload = bytearray(b"%PDF-1.4\n")
+        offsets = [0]
+        for number, obj in enumerate(objects, 1):
+            offsets.append(len(payload))
+            payload.extend(f"{number} 0 obj\n".encode()); payload.extend(obj); payload.extend(b"\nendobj\n")
+        xref = len(payload)
+        payload.extend(f"xref\n0 {len(objects)+1}\n0000000000 65535 f \n".encode())
+        for offset in offsets[1:]:
+            payload.extend(f"{offset:010d} 00000 n \n".encode())
+        payload.extend(f"trailer\n<< /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode())
         storage_key = uuid4().hex + ".pdf"
-        (upload_dir / storage_key).write_bytes(payload)
+        (upload_dir / storage_key).write_bytes(bytes(payload))
         record = DocumentRecord(application_id=application.id, original_name=f"DEMO - {slot}.pdf",
             storage_key=storage_key, content_type="application/pdf", size_bytes=len(payload), uploaded_by=uploaded_by)
-        db.add(record)
-        db.flush()
+        db.add(record); db.flush()
         db.add(DocumentQualityCheck(document_id=record.id, application_id=application.id, slot_name=slot,
             status="Needs Review", findings_json=json.dumps(["Synthetic demo sample; open and review before verifying the related checklist item."])))
 
