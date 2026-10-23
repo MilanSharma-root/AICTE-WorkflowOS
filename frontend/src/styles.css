@@ -467,3 +467,5 @@ tbody tr:last-child td { border-bottom: 0; }
 .automation-issues th:nth-child(4),.automation-issues td:nth-child(4){width:42%;min-width:400px}
 .automation-issues td:nth-child(1) b{display:block;white-space:normal;overflow-wrap:anywhere;color:#34475d}
 @media(max-width:700px){.automation-issues table{min-width:900px}.automation-issues th,.automation-issues td{padding:10px 11px}}
+
+.automation-finding-text{white-space:normal;overflow-wrap:anywhere;line-height:1.6;max-width:560px;color:#52647a}
