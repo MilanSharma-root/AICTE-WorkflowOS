@@ -11,6 +11,13 @@ class Settings(BaseSettings):
     token_hours: int = 8
     upload_dir: str = "storage/documents"
     max_upload_mb: int = 10
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
