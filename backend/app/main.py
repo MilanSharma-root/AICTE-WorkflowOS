@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import Base, engine, get_db, SessionLocal
 from app.models import (Alert, Application, AuditEvent, ComplianceItem, DocumentRecord,
-                        EVCVisit, Undertaking, User, WorkflowEvent, WorkflowConfiguration, ApplicationWorkflowRoute, DocumentChecklistTemplate, ApplicationDocumentCheck, DocumentValidity, DocumentQualityCheck, StageChecklistItem)
+                        EVCVisit, Undertaking, User, WorkflowEvent, WorkflowConfiguration, ApplicationWorkflowRoute, DocumentChecklistTemplate, ApplicationDocumentCheck, DocumentValidity, DocumentQualityCheck, StageChecklistItem, CollegeProfile)
 from app.schemas import (ApplicationCreate, ApplicationOut, ApplicationUpdate, ComplianceCreate,
                          ComplianceUpdate, EVCVisitCreate, EVCVisitUpdate, LoginIn,
                          TransitionIn, UndertakingCreate, UndertakingUpdate, WorkflowConfigUpdate, ApplicationWorkflowRouteUpdate, DocumentChecklistTemplateUpdate, DocumentCheckUpdate, DocumentValidityCreate, DocumentValidityUpdate)
