@@ -110,3 +110,27 @@ npm run build
 ```
 
 A passing local build/test run is still required after pulling changes. This repository does not claim certification, regulatory approval, or integration with official AICTE systems.
+
+
+## SMTP email configuration
+
+The college correction-email flow uses environment variables in the backend runtime. SMTP credentials must never be committed to Git.
+
+Set these variables in backend/.env for local development (create the file yourself; do not commit it), or in your deployment provider's backend service environment settings:
+
+```dotenv
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=your-sender@gmail.com
+SMTP_PASSWORD=your-16-character-google-app-password
+SMTP_FROM=your-sender@gmail.com
+SMTP_USE_TLS=true
+SMTP_USE_SSL=false
+```
+
+- For Gmail, enable 2-Step Verification and create an App Password in your Google Account. Use that app password as SMTP_PASSWORD; do not use your normal Google password.
+- Port 587 uses STARTTLS (SMTP_USE_TLS=true, SMTP_USE_SSL=false). For providers requiring implicit TLS, commonly port 465, use SMTP_USE_SSL=true and SMTP_USE_TLS=false.
+- SMTP_FROM should be an address permitted by the SMTP provider. The college's registered email address is the recipient.
+- Restart the backend after changing environment variables. In a hosted deployment, add the variables to the backend service's environment settings and redeploy/restart that service.
+- If SMTP_HOST or SMTP_FROM is missing, the application records that email was not sent. Failed SMTP authentication or delivery should be checked in backend logs/audit events.
+- Send a real test only to an address you control before demoing with college submissions. Never commit .env, app passwords, or SMTP secrets to Git.
