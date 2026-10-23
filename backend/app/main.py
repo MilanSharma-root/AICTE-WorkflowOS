@@ -121,11 +121,18 @@ def sync_deadline_alerts(db: Session):
             level_title = f"Escalation L{level}: overdue application"
             if not db.scalar(select(Alert.id).where(Alert.application_id == item.id, Alert.category == "Escalation", Alert.title == level_title)):
                 db.add(Alert(application_id=item.id, title=level_title, message=f"{item.application_no} is {overdue_days} day(s) overdue. Level {level} follow-up is due; notify/refer to the designated authority according to locally approved escalation policy.", severity="Critical" if level >= 2 else "High", category="Escalation"))
-    for item in db.scalars(select(ComplianceItem).where(ComplianceItem.status.not_in(["Verified", "Submitted"]))).all():
+    for item in db.scalars(select(ComplianceItem)).all():
         if not item.due_date:
             continue
         days = (safe_dt(item.due_date) - now).total_seconds() / 86400
-        if days <= 3:
+        # Completed decisions are never downgraded to overdue by the scheduler.
+        if days < 0 and item.status not in {"Compliant", "Non-Compliant", "Verified", "Submitted", "Overdue"}:
+            previous_status = item.status
+            item.status = "Overdue"
+            item.updated_at = now
+            db.add(ComplianceStatusHistory(compliance_item_id=item.id, from_status=previous_status, to_status="Overdue",
+                note="Scheduled deadline check marked unresolved task overdue.", changed_by="system"))
+        if days <= 3 and item.status not in {"Compliant", "Non-Compliant", "Verified", "Submitted"}:
             title = "Compliance deadline: " + item.title
             if not db.scalar(select(Alert.id).where(Alert.application_id == item.application_id, Alert.category == "Compliance", Alert.title == title)):
                 db.add(Alert(application_id=item.application_id, title=title, message=f"Compliance item '{item.title}' is {'overdue' if days < 0 else 'due soon'}.", severity="Critical" if days < 0 else "High", category="Compliance"))
