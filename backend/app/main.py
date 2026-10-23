@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
-import csv, io, json, threading
+import csv, io, json, threading, random
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
@@ -221,6 +221,161 @@ def ensure_stage_checklist(db: Session, application: Application, stage: str):
                                       notes="Default workflow task; verify against applicable official requirements.",
                                       updated_by="system"))
 
+
+SYNTHETIC_APPLICATION_TARGET = 900
+SYNTHETIC_PREFIX = "SYN-2026-"
+
+def seed_synthetic_applications(db: Session) -> int:
+    """Idempotently create a realistic, explicitly synthetic local demo portfolio."""
+    if settings.app_env.strip().lower() in {"prod", "production"}:
+        return 0
+    if not db.scalar(select(User.id).where(User.username == "admin@demo.local")):
+        return 0
+    existing_numbers = set(db.scalars(select(Application.application_no).where(
+        Application.application_no.like(f"{SYNTHETIC_PREFIX}%"))).all())
+    if len(existing_numbers) >= SYNTHETIC_APPLICATION_TARGET:
+        return 0
+    rng = random.Random(20261024)
+    institutions = [
+        "North Valley Institute of Technology", "Saraswati College of Engineering",
+        "Riverbend Institute of Management", "Pioneer Polytechnic Institute",
+        "Aryavart School of Engineering", "National Institute of Applied Sciences",
+        "Shivneri Technical Campus", "Eastern Gateway College of Technology",
+        "Greenfield Institute of Computing", "Pragati College of Engineering",
+        "Horizon Institute of Professional Studies", "Central Institute of Design and Technology",
+        "Lotus Valley School of Management", "Vindhya Institute of Technology",
+        "Sapphire College of Applied Engineering", "Unity Institute of Technical Education",
+        "Crescent School of Engineering", "Deccan Institute of Digital Technology",
+        "Blue Ridge Polytechnic", "Sunrise Institute of Science and Management",
+    ]
+    states = [
+        ("Uttar Pradesh", ["Noida", "Lucknow", "Kanpur", "Agra", "Varanasi", "Ghaziabad"]),
+        ("Maharashtra", ["Pune", "Nagpur", "Nashik", "Aurangabad", "Mumbai"]),
+        ("Rajasthan", ["Jaipur", "Jodhpur", "Kota", "Udaipur"]),
+        ("Madhya Pradesh", ["Bhopal", "Indore", "Jabalpur", "Gwalior"]),
+        ("Karnataka", ["Bengaluru", "Mysuru", "Hubballi", "Mangaluru"]),
+        ("Tamil Nadu", ["Chennai", "Coimbatore", "Madurai", "Salem"]),
+        ("Gujarat", ["Ahmedabad", "Surat", "Vadodara", "Rajkot"]),
+        ("Telangana", ["Hyderabad", "Warangal", "Karimnagar"]),
+        ("Haryana", ["Gurugram", "Faridabad", "Rohtak"]),
+        ("Uttarakhand", ["Dehradun", "Haridwar", "Roorkee"]),
+        ("Bihar", ["Patna", "Gaya", "Muzaffarpur"]),
+        ("West Bengal", ["Kolkata", "Durgapur", "Siliguri"]),
+    ]
+    types = ["Technical Institution", "Engineering College", "Polytechnic", "Management Institution"]
+    application_types = ["New Institution", "Extension of Approval", "Increase in Intake", "New Course"]
+    stages = ["Application Intake", "Scrutiny", "Re-scrutiny", "EVC Scheduling", "EVC Visit",
+              "SAC/SHC Review", "Compliance", "Approved / Closed", "Returned to Institution", "Rejected"]
+    weights = [7, 22, 10, 9, 7, 12, 15, 8, 6, 4]
+    owner = {"Application Intake":"Case Officer","Scrutiny":"Scrutiny Officer","Re-scrutiny":"Scrutiny Officer",
+             "EVC Scheduling":"EVC Officer","EVC Visit":"EVC Officer","SAC/SHC Review":"SAC/SHC Officer",
+             "Compliance":"Compliance Officer","Approved / Closed":"Final Approval Officer",
+             "Returned to Institution":"Scrutiny Officer","Rejected":"Final Approval Officer"}
+    statuses = {"Application Intake":["Pending","In Review"],"Scrutiny":["In Review","Pending"],
+                 "Re-scrutiny":["In Review","Returned"],"EVC Scheduling":["In Review","Pending"],
+                 "EVC Visit":["In Review","Pending"],"SAC/SHC Review":["In Review","Pending"],
+                 "Compliance":["In Review","Pending"],"Approved / Closed":["Completed"],
+                 "Returned to Institution":["Returned"],"Rejected":["Rejected"]}
+    created = 0
+    for number in range(1, SYNTHETIC_APPLICATION_TARGET + 1):
+        application_no = f"{SYNTHETIC_PREFIX}{number:04d}"
+        if application_no in existing_numbers:
+            continue
+        state, cities = rng.choice(states)
+        city = rng.choice(cities)
+        stage = rng.choices(stages, weights=weights, k=1)[0]
+        submitted = utcnow() - timedelta(days=rng.randint(0, 330), hours=rng.randint(0, 23))
+        due = submitted + timedelta(days=rng.choice([30, 45, 60, 90, 120, 180]))
+        status = "Completed" if stage == "Approved / Closed" else ("Rejected" if stage == "Rejected" else ("Returned" if stage == "Returned to Institution" else rng.choice(statuses[stage])))
+        app = Application(application_no=application_no,
+            institution_name=f"{rng.choice(institutions)} - {city} {number:03d}",
+            institution_type=rng.choice(types), state=state, application_type=rng.choice(application_types),
+            current_stage=stage, status=status,
+            priority=rng.choices(["Low","Normal","High","Critical"], weights=[15,55,24,6], k=1)[0],
+            assigned_to=owner[stage], submitted_at=submitted, due_date=due,
+            notes=f"SYNTHETIC DEMO RECORD. City: {city}. Not an actual institution or official AICTE application.")
+        db.add(app); db.flush()
+        db.add(WorkflowEvent(application_id=app.id, from_stage=None, to_stage="Application Intake",
+            status="Submitted", note="Synthetic demo application created for workflow testing.",
+            actor="Synthetic demo generator", created_at=submitted))
+        if stage != "Application Intake":
+            db.add(WorkflowEvent(application_id=app.id, from_stage="Application Intake", to_stage=stage,
+                status=status, note="Synthetic stage placement for dashboard testing; not an official decision.",
+                actor="Synthetic demo generator", created_at=min(utcnow(), submitted + timedelta(days=rng.randint(1,25)))))
+        created += 1
+    db.flush()
+    return created
+
+def seed_synthetic_supporting_records(db: Session) -> None:
+    """Attach synthetic checklists, validity metadata and compliance work to synthetic cases."""
+    if settings.app_env.strip().lower() in {"prod", "production"}:
+        return
+    apps = db.scalars(select(Application).where(Application.application_no.like(f"{SYNTHETIC_PREFIX}%"))).all()
+    rng = random.Random(20261025)
+    templates = [("registration","Institution registration / approval proof"),
+                 ("land_building","Land / building evidence"),
+                 ("faculty_infrastructure","Faculty / infrastructure details")]
+    order = {name: idx for idx, name in enumerate(WORKFLOW_STAGES)}
+    for app in apps:
+        docs = db.scalars(select(DocumentRecord).where(DocumentRecord.application_id == app.id).order_by(DocumentRecord.id)).all()
+        existing_checks = db.scalars(select(ApplicationDocumentCheck).where(ApplicationDocumentCheck.application_id == app.id)).all()
+        by_key = {row.item_key: row for row in existing_checks}
+        stage_index = order.get(app.current_stage, 1)
+        for idx, (key, label) in enumerate(templates):
+            doc = docs[idx] if idx < len(docs) else None
+            if key in by_key:
+                if by_key[key].document_id is None and doc is not None and by_key[key].status != "Missing":
+                    by_key[key].document_id = doc.id
+                continue
+            if doc is None:
+                status = "Missing"
+            elif stage_index >= order["EVC Scheduling"]:
+                status = "Verified"
+            elif stage_index <= order["Scrutiny"]:
+                status = rng.choices(["Pending","Verified","Needs Review","Missing"], [42,35,15,8], k=1)[0]
+            else:
+                status = rng.choices(["Verified","Pending","Needs Review"], [72,18,10], k=1)[0]
+            db.add(ApplicationDocumentCheck(application_id=app.id, item_key=key, label=label,
+                required=True, status=status, document_id=doc.id if doc and status != "Missing" else None,
+                notes="Synthetic demo checklist item; validate against current official guidance.",
+                updated_by="Synthetic demo generator"))
+        if not db.scalar(select(DocumentValidity.id).where(DocumentValidity.application_id == app.id)):
+            offset = rng.choice([-60,-10,5,20,60,120,365])
+            expiry = utcnow() + timedelta(days=offset)
+            db.add(DocumentValidity(application_id=app.id, document_id=docs[0].id if docs else None,
+                document_name="Synthetic building / occupancy certificate", category="Illustrative validity metadata",
+                issued_on=expiry-timedelta(days=365), expiry_date=expiry, renewal_due_date=expiry-timedelta(days=30),
+                status="Expired" if offset < 0 else ("Expiring" if offset <= 30 else "Active"),
+                notes="Synthetic sample date for automation demonstration only; not an AICTE-mandated validity period.",
+                created_by="Synthetic demo generator", updated_by="Synthetic demo generator"))
+        if app.current_stage in {"Compliance","Approved / Closed"} and not db.scalar(select(Undertaking.id).where(Undertaking.application_id == app.id)):
+            db.add(Undertaking(application_id=app.id, title="Synthetic compliance undertaking",
+                submitted=rng.random()<0.68, due_date=app.due_date,
+                notes="Illustrative demo undertaking only; replace with configured official requirement."))
+        if app.current_stage == "Compliance" and not db.scalar(select(ComplianceItem.id).where(ComplianceItem.application_id == app.id)):
+            for title, category in [("Verify recorded undertaking status","Undertaking"),
+                                    ("Review illustrative certificate validity","Document Validity")]:
+                due = app.due_date
+                status = "Compliant" if rng.random()<0.45 else ("Overdue" if due and due<utcnow() else "Pending")
+                db.add(ComplianceItem(application_id=app.id, title=title, category=category,
+                    due_date=due, status=status, assigned_to=app.assigned_to,
+                    notes="Synthetic demonstration task; not a statutory determination."))
+        if app.current_stage in {"SAC/SHC Review","Compliance","Approved / Closed"} and not db.scalar(select(StageChecklistItem.id).where(
+            StageChecklistItem.application_id == app.id, StageChecklistItem.stage == "SAC/SHC Review")):
+            db.add(StageChecklistItem(application_id=app.id, stage="SAC/SHC Review",
+                title="Review synthetic committee recommendation", required=True,
+                status="Verified" if app.current_stage in {"Compliance","Approved / Closed"} else "Pending",
+                notes="Synthetic demo checklist item; confirm actual committee requirements before use.",
+                updated_by="Synthetic demo generator"))
+        if app.current_stage in {"Compliance","Approved / Closed"} and not db.scalar(select(StageChecklistItem.id).where(
+            StageChecklistItem.application_id == app.id, StageChecklistItem.stage == "Compliance")):
+            db.add(StageChecklistItem(application_id=app.id, stage="Compliance",
+                title="Review synthetic compliance undertaking", required=True,
+                status="Verified" if app.current_stage == "Approved / Closed" else "Pending",
+                notes="Synthetic demo checklist item; confirm actual conditions and deadlines from official records.",
+                updated_by="Synthetic demo generator"))
+    db.flush()
+
 def seed_demo_data(db: Session):
     """Seed local demo accounts only; never create synthetic application records."""
     if settings.app_env.strip().lower() in {"prod", "production"}:
@@ -252,10 +407,12 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         seed_demo_data(db)
-        # Backfill demo review documents for existing applications as well as new ones.
-        # The helper skips any slot that already has a quality-check record.
+        # Seed 900 deterministic synthetic applications in non-production environments.
+        seed_synthetic_applications(db)
+        # Backfill clearly labelled synthetic PDF samples for the application register.
         for existing_application in db.scalars(select(Application)).all():
             seed_demo_documents(db, existing_application, "Synthetic demo generator")
+        seed_synthetic_supporting_records(db)
         db.commit()
         if not db.scalar(select(func.count()).select_from(WorkflowConfiguration)):
             db.add(WorkflowConfiguration(name="Default approval route", stages_json=json.dumps(WORKFLOW_STAGES), active=True, updated_by="system"))
