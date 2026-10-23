@@ -183,6 +183,7 @@ async def create_college_submission(
            f"{application.application_no}; exactly three required documents stored")
     email_sent = False
     if all_issues:
+        application.status = "Returned"
         correction_alert = Alert(application_id=application.id, title="Document correction required",
                                  message=f"{application.application_no}: preliminary document checks found {len(all_issues)} issue(s).",
                                  severity="High", category="Document Quality")
@@ -358,6 +359,9 @@ async def replace_college_document(document_id: int, file: UploadFile = File(...
     profile = db.scalar(select(CollegeProfile).where(CollegeProfile.user_id == user.id))
     if not profile:
         raise HTTPException(404, "College profile not found")
+    application = db.get(Application, profile.application_id)
+    if not application:
+        raise HTTPException(404, "Application not found")
     record = db.get(DocumentRecord, document_id)
     if not record or record.application_id != profile.application_id:
         raise HTTPException(404, "Document not found for this college application")
@@ -394,6 +398,7 @@ async def replace_college_document(document_id: int, file: UploadFile = File(...
     all_issues.extend([f"{check.slot_name}: {finding}" for finding in findings] if check else findings)
     _audit(db, "COLLEGE_DOCUMENT_REPLACED", profile.institution_name, profile.application_id, f"Corrected document: {check.slot_name if check else safe_name}")
     if all_issues:
+        application.status = "Returned"
         alert = Alert(application_id=profile.application_id, title="Document correction required",
                       message=f"{len(all_issues)} preliminary document issue(s) remain; checking email delivery.",
                       severity="High", category="Document Quality")
@@ -410,6 +415,8 @@ async def replace_college_document(document_id: int, file: UploadFile = File(...
             alert.message = f"{len(all_issues)} preliminary document issue(s) remain. Correction email delivery failed."
             _audit(db, "CORRECTION_EMAIL_FAILED", "system", profile.application_id, f"SMTP delivery failed: {type(exc).__name__}")
     else:
+        if application.status == "Returned":
+            application.status = "Pending"
         for alert in db.scalars(select(Alert).where(Alert.application_id == profile.application_id, Alert.category == "Document Quality", Alert.acknowledged.is_(False))).all():
             alert.acknowledged = True
             alert.acknowledged_by = "system"
