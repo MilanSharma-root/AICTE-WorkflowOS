@@ -52,62 +52,6 @@ def stages_for_application(db: Session, application_type: str) -> list[str]:
     return get_workflow_stages(db)
 
 
-def _demo_pdf_bytes(institution_name: str, application_no: str, title: str, lines: list[str]) -> bytes:
-    """Create a clearly-labelled synthetic one-page PDF for demo workflow testing."""
-    def esc(value: str) -> str:
-        return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")[:110]
-    text_lines = ["SYNTHETIC DEMO DOCUMENT - NOT AN OFFICIAL AICTE RECORD", title,
-                  f"Institution: {institution_name}", f"Application: {application_no}", "",
-                  *lines, "", "For prototype demonstration only. Verify against official requirements."]
-    commands = ["BT", "/F1 10 Tf", "50 790 Td"]
-    for idx, line in enumerate(text_lines):
-        if idx:
-            commands.append("0 -22 Td")
-        commands.append(f"({esc(line)}) Tj")
-    commands.append("ET")
-    stream = "\n".join(commands).encode("latin-1", "replace")
-    objects = [
-        b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
-    ]
-    out = bytearray(b"%PDF-1.4\n")
-    offsets = [0]
-    for number, obj in enumerate(objects, 1):
-        offsets.append(len(out))
-        out.extend(f"{number} 0 obj\n".encode()); out.extend(obj); out.extend(b"\nendobj\n")
-    xref = len(out)
-    out.extend(f"xref\n0 {len(objects)+1}\n0000000000 65535 f \n".encode())
-    for offset in offsets[1:]:
-        out.extend(f"{offset:010d} 00000 n \n".encode())
-    out.extend(f"trailer\n<< /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode())
-    return bytes(out)
-
-
-def seed_demo_documents(db: Session, application: Application, uploaded_by: str) -> None:
-    """Attach three synthetic review samples to every newly-created application."""
-    slots = [
-        ("Institution Approval Letter", ["Reference: DEMO-IAL-001", "Purpose: Institution identity and approval reference", "Status: Sample for officer review"]),
-        ("Land / Building Documents", ["Reference: DEMO-LBD-002", "Purpose: Campus and infrastructure evidence", "Status: Sample for officer review"]),
-        ("Faculty / Infrastructure Details", ["Reference: DEMO-FID-003", "Purpose: Faculty and facility summary", "Status: Sample for officer review"]),
-    ]
-    upload_dir = Path(settings.upload_dir)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    for slot, lines in slots:
-        storage_key = uuid4().hex + ".pdf"
-        payload = _demo_pdf_bytes(application.institution_name, application.application_no, slot, lines)
-        (upload_dir / storage_key).write_bytes(payload)
-        record = DocumentRecord(application_id=application.id, original_name=f"DEMO - {slot}.pdf",
-            storage_key=storage_key, content_type="application/pdf", size_bytes=len(payload),
-            uploaded_by=uploaded_by)
-        db.add(record)
-        db.flush()
-        db.add(DocumentQualityCheck(document_id=record.id, application_id=application.id,
-            slot_name=slot, status="Needs Review",
-            findings_json=json.dumps(["Synthetic demo file attached automatically. Open and review before marking correct."])))
-
 def sync_deadline_alerts(db: Session):
     now = utcnow()
     for item in db.scalars(select(Application).where(Application.status.not_in(["Completed", "Rejected"]))).all():
@@ -475,7 +419,6 @@ def create_public_application(payload: ApplicationCreate, db: Session = Depends(
         due_date=None, notes=payload.notes, status="Pending"
     )
     db.add(application); db.flush()
-    seed_demo_documents(db, application, "Synthetic demo generator")
     db.add(WorkflowEvent(application_id=application.id, from_stage=None, to_stage=application.current_stage,
                          status=application.status, actor="College Portal", note="Public college application submitted; awaiting authorised manual review"))
     audit(db, "PUBLIC_APPLICATION_SUBMITTED", "College Portal", application.id,
