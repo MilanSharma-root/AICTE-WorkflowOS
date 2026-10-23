@@ -291,7 +291,7 @@ def _stage_role(stage: str) -> str | None:
     return {
         "Application Intake": "scrutiny_officer", "Scrutiny": "scrutiny_officer", "Re-scrutiny": "scrutiny_officer",
         "EVC Scheduling": "evc_officer", "EVC Visit": "evc_officer",
-        "SAC/SHC Review": "sac_shc_officer", "Compliance": "compliance_officer",
+        "SAC/SHC Review": "sac_shc_officer", "Compliance": "compliance_officer", "Final Approval": "final_approval_officer",
     }.get(stage)
 
 
