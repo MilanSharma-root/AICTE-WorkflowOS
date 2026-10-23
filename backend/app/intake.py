@@ -92,12 +92,12 @@ def _send_correction_email(recipient: str, application_no: str, institution_name
     message["Subject"] = f"Action required: documents need correction for {application_no}"
     message["From"] = sender
     message["To"] = recipient
-    issue_lines = "\\n".join(f"- {issue}" for issue in issues)
+    issue_lines = "\n".join(f"- {issue}" for issue in issues)
     message.set_content(
-        f"Dear {institution_name},\\n\\n"
-        f"Automated preliminary checks found possible issues in your AICTE WorkflowOS submission ({application_no}):\\n"
-        f"{issue_lines}\\n\\n"
-        "Please sign in to the College Portal and upload corrected documents. These checks are preliminary and do not constitute an official compliance decision.\\n"
+        f"Dear {institution_name},\n\n"
+        f"Automated preliminary checks found possible issues in your AICTE WorkflowOS submission ({application_no}):\n"
+        f"{issue_lines}\n\n"
+        "Please sign in to the College Portal and upload corrected documents. These checks are preliminary and do not constitute an official compliance decision.\n"
     )
     if use_ssl:
         with smtplib.SMTP_SSL(host, port, timeout=20) as server:
@@ -191,13 +191,28 @@ async def create_college_submission(
     _audit(db, "COLLEGE_ACCOUNT_CREATED", institution_name.strip(), application.id, f"College account created for {email}")
     _audit(db, "COLLEGE_APPLICATION_SUBMITTED", institution_name.strip(), application.id,
            f"{application.application_no}; exactly three required documents stored")
-    # Intake checks are advisory. A staff reviewer must explicitly mark a document
-    # incorrect before the college is sent a correction email.
+    # Notify the institution immediately when preliminary checks flag a document.
+    # These are automated screening findings, not a final regulatory decision.
     email_sent = False
+    email_error = False
     if all_issues:
-        db.add(Alert(application_id=application.id, title="Document review required",
-                     message=f"{application.application_no}: preliminary checks flagged {len(all_issues)} possible issue(s). A staff reviewer must inspect the files.",
-                     severity="Medium", category="Document Quality"))
+        application.status = "Returned"
+        try:
+            email_sent = _send_correction_email(email, application.application_no,
+                                                application.institution_name, all_issues)
+        except Exception as exc:
+            email_error = True
+            _audit(db, "CORRECTION_EMAIL_FAILED", "system", application.id,
+                   f"SMTP delivery failed: {type(exc).__name__}")
+        if email_sent:
+            _audit(db, "CORRECTION_EMAIL_SENT", "system", application.id,
+                   f"Automated screening correction notice sent to {email}")
+        db.add(Alert(application_id=application.id, title="Document correction required",
+                     message=(f"{application.application_no}: preliminary checks flagged {len(all_issues)} possible issue(s). "
+                              + ("Correction email sent to the institution." if email_sent else
+                                 "Email delivery failed; check SMTP configuration." if email_error else
+                                 "SMTP is not configured, so no email was sent.")),
+                     severity="High", category="Document Quality"))
     db.commit()
     return {
         "application_id": application.id,
@@ -208,7 +223,8 @@ async def create_college_submission(
         "document_checks": [{"slot": slot_label, "status": "Needs Correction" if any(issue.startswith(slot_label + ":") for issue in all_issues) else ("Manual Review Required" if Path(filename).suffix.lower() in {".png", ".jpg", ".jpeg"} else "Preliminary Checks Passed")} for _, slot_label, filename, _, _ in prepared],
         "issues": all_issues,
         "correction_email_sent": email_sent,
-        "email_delivery_configured": bool(os.getenv("SMTP_HOST") and os.getenv("SMTP_FROM")),
+        "email_delivery_configured": bool(os.getenv("SMTP_HOST", "").strip() and os.getenv("SMTP_FROM", "").strip()),
+        "email_delivery_error": email_error,
     }
 
 
