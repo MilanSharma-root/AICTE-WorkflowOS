@@ -469,7 +469,7 @@ def try_auto_route_to_evc(db: Session, application: Application, actor: str) -> 
             proposed_date=None,
             location="Institution campus",
             panel_members=None,
-            status="Pending Scheduling",
+            status="Proposed",
         ))
     evc_officer = db.scalar(select(User).where(
         User.role == "evc_officer", User.active.is_(True)
