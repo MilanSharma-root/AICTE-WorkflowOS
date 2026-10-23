@@ -630,10 +630,11 @@ def update_stage_checklist_item(item_id: int, payload: StageChecklistUpdate, db:
                 configured_stages = []
             operational_stages = [str(stage) for stage in configured_stages
                                   if stage not in {"Re-scrutiny", "Returned to Institution", "Approved / Closed", "Rejected"}]
-            if "Compliance" in operational_stages:
-                index = operational_stages.index("Compliance")
-                next_stage = operational_stages[index + 1] if index + 1 < len(operational_stages) else None
-                if next_stage == "Final Approval":
+            # Compliance is the final checklist stage before an authorised human
+            # decision. Do not strand the application if an admin's route omits or
+            # misorders Final Approval; the decision stage is mandatory.
+            next_stage = "Final Approval"
+            if next_stage:
                     previous_stage = application.current_stage
                     application.current_stage = next_stage
                     application.status = "In Review"
