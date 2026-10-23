@@ -96,37 +96,37 @@ def _send_correction_email(recipient: str, application_no: str, institution_name
 
     # Each issue is prefixed with the official document slot label, so the
     # institution can identify exactly which uploaded document needs attention.
-    issue_lines = "\\n".join(f"  • {issue}" for issue in issues)
+    issue_lines = "\n".join(f"  • {issue}" for issue in issues)
     document_names = []
     for issue in issues:
         document_name = issue.split(":", 1)[0].strip()
         if document_name and document_name not in document_names:
             document_names.append(document_name)
-    document_lines = "\\n".join(f"  • {name}" for name in document_names)
+    document_lines = "\n".join(f"  • {name}" for name in document_names)
 
     message.set_content(
-        f"Dear {institution_name},\\n\\n"
+        f"Dear {institution_name},\n\n"
         "Your institution's submission has been reviewed by the AICTE WorkflowOS automated preliminary document checks. "
-        "One or more possible issues were detected, so the application has been marked as Returned for document correction.\\n\\n"
-        f"APPLICATION DETAILS\\n"
-        f"Institution: {institution_name}\\n"
-        f"Application Number: {application_no}\\n"
-        f"Current Status: Returned — Correction Required\\n\\n"
-        f"DOCUMENT(S) REQUIRING ATTENTION\\n"
-        f"{document_lines}\\n\\n"
-        f"ISSUES FOUND\\n"
-        f"{issue_lines}\\n\\n"
-        "WHAT YOU NEED TO DO\\n"
-        "1. Sign in to the AICTE WorkflowOS College Portal using your registered institutional email.\\n"
-        "2. Open this application and locate each document listed above.\\n"
-        "3. Correct the specific issue mentioned for each document. For example, upload a clearer/readable scan if the file is blurred or unreadable, and verify that the institution name, date, year, or reference number is visible and accurate where applicable.\\n"
-        "4. Replace only the affected document(s) with the corrected file(s), then review the application status in the portal.\\n\\n"
-        "IMPORTANT\\n"
+        "One or more possible issues were detected, so the application has been marked as Returned for document correction.\n\n"
+        f"APPLICATION DETAILS\n"
+        f"Institution: {institution_name}\n"
+        f"Application Number: {application_no}\n"
+        f"Current Status: Returned — Correction Required\n\n"
+        f"DOCUMENT(S) REQUIRING ATTENTION\n"
+        f"{document_lines}\n\n"
+        f"ISSUES FOUND\n"
+        f"{issue_lines}\n\n"
+        "WHAT YOU NEED TO DO\n"
+        "1. Sign in to the AICTE WorkflowOS College Portal using your registered institutional email.\n"
+        "2. Open this application and locate each document listed above.\n"
+        "3. Correct the specific issue mentioned for each document. For example, upload a clearer/readable scan if the file is blurred or unreadable, and verify that the institution name, date, year, or reference number is visible and accurate where applicable.\n"
+        "4. Replace only the affected document(s) with the corrected file(s), then review the application status in the portal.\n\n"
+        "IMPORTANT\n"
         "These are automated preliminary screening findings and may require human review. They are not a final AICTE compliance decision or approval/rejection. "
-        "After you upload corrected documents, the authorised AICTE officer may still need to verify them manually.\\n\\n"
-        "If you believe a finding is incorrect or need assistance, contact the designated AICTE WorkflowOS support/helpdesk through your official channel and quote the application number above.\\n\\n"
-        "Regards,\\n"
-        "AICTE WorkflowOS — Document Screening & Application Support\\n"
+        "After you upload corrected documents, the authorised AICTE officer may still need to verify them manually.\n\n"
+        "If you believe a finding is incorrect or need assistance, contact the designated AICTE WorkflowOS support/helpdesk through your official channel and quote the application number above.\n\n"
+        "Regards,\n"
+        "AICTE WorkflowOS — Document Screening & Application Support\n"
         "This is an automated notification. Please do not reply to this email."
     )
     if use_ssl:
