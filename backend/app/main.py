@@ -818,6 +818,50 @@ def _compliance_out(item: ComplianceItem, db: Session) -> dict:
         "status": _effective_compliance_status(item), "assigned_to": item.assigned_to,
         "notes": item.notes, "updated_at": item.updated_at, "created_at": item.created_at}
 
+def sync_recorded_compliance_tasks(db: Session) -> int:
+    """Create idempotent tasks only from explicitly recorded validity and undertaking data."""
+    created = 0
+    validity_rows = db.scalars(select(DocumentValidity)).all()
+    for record in validity_rows:
+        if not record.expiry_date and not record.renewal_due_date:
+            continue
+        title = f"Review validity: {record.document_name}"
+        exists = db.scalar(select(ComplianceItem.id).where(
+            ComplianceItem.application_id == record.application_id,
+            ComplianceItem.title == title))
+        if exists:
+            continue
+        due = record.renewal_due_date or record.expiry_date
+        task = ComplianceItem(application_id=record.application_id, title=title,
+            category="Document Validity", due_date=due, status="Pending",
+            assigned_to=record.updated_by or None,
+            notes=f"Generated from recorded document validity metadata (record #{record.id}). Review the linked validity record; expiry is not itself a compliance decision.")
+        db.add(task); db.flush()
+        db.add(ComplianceStatusHistory(compliance_item_id=task.id, from_status=None, to_status="Pending",
+            note=f"Generated from document validity record #{record.id}.", changed_by="system"))
+        created += 1
+    undertaking_rows = db.scalars(select(Undertaking)).all()
+    for undertaking in undertaking_rows:
+        if undertaking.submitted:
+            continue
+        title = f"Pending undertaking: {undertaking.title}"
+        exists = db.scalar(select(ComplianceItem.id).where(
+            ComplianceItem.application_id == undertaking.application_id,
+            ComplianceItem.title == title))
+        if exists:
+            continue
+        task = ComplianceItem(application_id=undertaking.application_id, title=title,
+            category="Undertaking", due_date=undertaking.due_date, status="Pending",
+            notes=f"Generated from pending undertaking record #{undertaking.id}. " +
+                  ("Deadline taken from the recorded undertaking." if undertaking.due_date else "No deadline is recorded; manual review required."))
+        db.add(task); db.flush()
+        db.add(ComplianceStatusHistory(compliance_item_id=task.id, from_status=None, to_status="Pending",
+            note=f"Generated from undertaking record #{undertaking.id}.", changed_by="system"))
+        created += 1
+    if created:
+        db.commit()
+    return created
+
 @app.get("/api/v1/compliance")
 def list_compliance(application_id: int | None = None, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
     stmt = select(ComplianceItem).order_by(ComplianceItem.due_date.asc())
