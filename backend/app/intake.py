@@ -45,8 +45,9 @@ def _analyse_document(slot_name: str, filename: str, content: bytes, institution
                 width, height = image.size
                 if width < 1000 or height < 700:
                     findings.append(f"Low image resolution ({width}×{height}); upload a clearer scan.")
+                grayscale_stats = ImageStat.Stat(image.convert("L"))
                 edge_stats = ImageStat.Stat(image.convert("L").filter(ImageFilter.FIND_EDGES))
-                if edge_stats.var[0] < 25:
+                if grayscale_stats.var[0] < 25 or edge_stats.var[0] < 25:
                     findings.append("Image appears blurred or low-contrast; upload a sharper, readable scan.")
         except Exception:
             findings.append("Image could not be decoded; upload a valid PNG or JPEG file.")
