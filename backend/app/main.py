@@ -52,6 +52,38 @@ def stages_for_application(db: Session, application_type: str) -> list[str]:
     return get_workflow_stages(db)
 
 
+
+def seed_demo_documents(db: Session, application: Application, uploaded_by: str) -> None:
+    """Create clearly-labelled synthetic PDF samples for prototype document review."""
+    from io import BytesIO
+    from reportlab.pdfgen import canvas
+    slots = [
+        ("Institution Approval Letter", "DEMO-IAL-001"),
+        ("Land / Building Documents", "DEMO-LBD-002"),
+        ("Faculty / Infrastructure Details", "DEMO-FID-003"),
+    ]
+    upload_dir = Path(settings.upload_dir)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    for slot, reference in slots:
+        buffer = BytesIO()
+        pdf = canvas.Canvas(buffer)
+        pdf.setFont("Helvetica-Bold", 15)
+        pdf.drawString(48, 790, "SYNTHETIC DEMO DOCUMENT")
+        pdf.setFont("Helvetica", 11)
+        lines = [slot, f"Institution: {application.institution_name}", f"Application: {application.application_no}", f"Reference: {reference}", "NOT an official AICTE record. For prototype review only."]
+        y = 750
+        for line in lines:
+            pdf.drawString(48, y, line[:100])
+            y -= 28
+        pdf.save()
+        payload = buffer.getvalue()
+        storage_key = uuid4().hex + ".pdf"
+        (upload_dir / storage_key).write_bytes(payload)
+        record = DocumentRecord(application_id=application.id, original_name=f"DEMO - {slot}.pdf", storage_key=storage_key, content_type="application/pdf", size_bytes=len(payload), uploaded_by=uploaded_by)
+        db.add(record)
+        db.flush()
+        db.add(DocumentQualityCheck(document_id=record.id, application_id=application.id, slot_name=slot, status="Needs Review", findings_json=json.dumps(["Synthetic sample attached automatically; open and inspect before marking correct."])))
+
 def sync_deadline_alerts(db: Session):
     now = utcnow()
     for item in db.scalars(select(Application).where(Application.status.not_in(["Completed", "Rejected"]))).all():
@@ -419,6 +451,7 @@ def create_public_application(payload: ApplicationCreate, db: Session = Depends(
         due_date=None, notes=payload.notes, status="Pending"
     )
     db.add(application); db.flush()
+    seed_demo_documents(db, application, "Synthetic demo generator")
     db.add(WorkflowEvent(application_id=application.id, from_stage=None, to_stage=application.current_stage,
                          status=application.status, actor="College Portal", note="Public college application submitted; awaiting authorised manual review"))
     audit(db, "PUBLIC_APPLICATION_SUBMITTED", "College Portal", application.id,
