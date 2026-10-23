@@ -469,3 +469,17 @@ tbody tr:last-child td { border-bottom: 0; }
 @media(max-width:700px){.automation-issues table{min-width:900px}.automation-issues th,.automation-issues td{padding:10px 11px}}
 
 .automation-finding-text{white-space:normal;overflow-wrap:anywhere;line-height:1.6;max-width:560px;color:#52647a}
+
+
+/* Compliance officer review-and-resolve dialog */
+.compliance-review-modal{width:min(100%,620px);max-height:90vh;overflow-y:auto;gap:14px}
+.compliance-review-modal>label{display:grid;gap:7px;font-size:11px;font-weight:700;color:#52647a}
+.compliance-review-modal textarea{width:100%;min-width:0;resize:vertical;border:1px solid #dfe6ef;border-radius:7px;background:#fff;padding:10px;font:400 11px/1.5 'DM Sans',sans-serif;color:#3d5067;outline-color:#7199c6}
+.compliance-review-summary{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr) minmax(0,1fr);gap:9px;padding:12px;border:1px solid #e8edf4;border-radius:8px;background:#f8fafc}
+.compliance-review-summary>div{min-width:0;display:grid;align-content:start;gap:6px}
+.compliance-review-summary small{font-size:9px;color:#8390a1}
+.compliance-review-summary strong{font-size:11px;line-height:1.45;color:#34475d;overflow-wrap:anywhere}
+.compliance-review-modal .notice-box{font-size:10px;line-height:1.55}
+.compliance-review-modal .modal-actions{flex-wrap:wrap}
+.compliance-review-button{font-size:10px;padding:8px 10px}
+@media(max-width:560px){.compliance-review-summary{grid-template-columns:minmax(0,1fr)}.compliance-review-modal .modal-actions{display:grid;grid-template-columns:1fr}.compliance-review-modal .modal-actions button{width:100%}}
