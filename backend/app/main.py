@@ -407,7 +407,7 @@ def transition_application(application_id: int, payload: TransitionIn, db: Sessi
                 raise HTTPException(409, "Document correction issues must be resolved before the application can advance.")
         outstanding = db.scalars(select(StageChecklistItem).where(
             StageChecklistItem.application_id == item.id,
-            StageChecklistItem.stage == item.current_stage,
+            StageChecklistItem.stage.in_([item.current_stage, "Final Approval"]) if item.current_stage == "Compliance" else StageChecklistItem.stage == item.current_stage,
             StageChecklistItem.required.is_(True),
         )).all()
         outstanding = [entry for entry in outstanding if entry.status not in {"Verified", "Not Applicable"}]
