@@ -799,7 +799,6 @@ def dashboard_summary(db: Session = Depends(get_db), user: User = Depends(requir
             "documents_expired": documents_expired, "documents_expiring_30_days": documents_expiring_30_days,
             "stage_counts": [{"stage": stage, "count": count} for stage, count in stage_rows]}
 
-@app.get("/api/v1/compliance")
 def _effective_compliance_status(item: ComplianceItem) -> str:
     if item.status not in {"Compliant", "Non-Compliant"} and item.due_date and safe_dt(item.due_date) < utcnow():
         return "Overdue"
@@ -862,6 +861,7 @@ def sync_recorded_compliance_tasks(db: Session) -> int:
         db.commit()
     return created
 
+@app.get("/api/v1/compliance")
 @app.get("/api/v1/compliance")
 def list_compliance(application_id: int | None = None, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
     stmt = select(ComplianceItem).order_by(ComplianceItem.due_date.asc())
