@@ -862,8 +862,8 @@ def sync_recorded_compliance_tasks(db: Session) -> int:
     return created
 
 @app.get("/api/v1/compliance")
-@app.get("/api/v1/compliance")
 def list_compliance(application_id: int | None = None, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    sync_recorded_compliance_tasks(db)
     stmt = select(ComplianceItem).order_by(ComplianceItem.due_date.asc())
     if application_id is not None: stmt = stmt.where(ComplianceItem.application_id == application_id)
     rows = db.scalars(stmt).all()
