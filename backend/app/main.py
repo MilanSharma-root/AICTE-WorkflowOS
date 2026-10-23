@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import Base, engine, get_db, SessionLocal
 from app.models import (Alert, Application, AuditEvent, ComplianceItem, DocumentRecord,
-                        EVCVisit, Undertaking, User, WorkflowEvent, WorkflowConfiguration, ApplicationWorkflowRoute, DocumentChecklistTemplate, ApplicationDocumentCheck, DocumentValidity, DocumentQualityCheck, StageChecklistItem, CollegeProfile)
+                        EVCVisit, Undertaking, User, WorkflowEvent, WorkflowConfiguration, ApplicationWorkflowRoute, DocumentChecklistTemplate, ApplicationDocumentCheck, DocumentValidity, DocumentQualityCheck, StageChecklistItem, CollegeProfile, ComplianceStatusHistory)
 from app.schemas import (ApplicationCreate, ApplicationOut, ApplicationUpdate, ComplianceCreate,
                          ComplianceUpdate, EVCVisitCreate, EVCVisitUpdate, LoginIn,
                          TransitionIn, UndertakingCreate, UndertakingUpdate, WorkflowConfigUpdate, ApplicationWorkflowRouteUpdate, DocumentChecklistTemplateUpdate, DocumentCheckUpdate, DocumentValidityCreate, DocumentValidityUpdate)
@@ -800,20 +800,56 @@ def dashboard_summary(db: Session = Depends(get_db), user: User = Depends(requir
             "stage_counts": [{"stage": stage, "count": count} for stage, count in stage_rows]}
 
 @app.get("/api/v1/compliance")
+def _effective_compliance_status(item: ComplianceItem) -> str:
+    if item.status not in {"Compliant", "Non-Compliant"} and item.due_date and safe_dt(item.due_date) < utcnow():
+        return "Overdue"
+    if item.status in {"Verified", "Submitted"}:
+        return "Compliant" if item.status == "Verified" else "Under Review"
+    if item.status in {"Rejected", "Expired"}:
+        return "Non-Compliant" if item.status == "Rejected" else "Overdue"
+    return item.status if item.status in {"Pending", "Under Review", "Compliant", "Non-Compliant", "Overdue"} else "Pending"
+
+def _compliance_out(item: ComplianceItem, db: Session) -> dict:
+    application = db.get(Application, item.application_id)
+    return {"id": item.id, "application_id": item.application_id,
+        "application_no": application.application_no if application else "",
+        "institution_name": application.institution_name if application else "",
+        "title": item.title, "category": item.category, "due_date": item.due_date,
+        "status": _effective_compliance_status(item), "assigned_to": item.assigned_to,
+        "notes": item.notes, "updated_at": item.updated_at, "created_at": item.created_at}
+
+@app.get("/api/v1/compliance")
 def list_compliance(application_id: int | None = None, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
     stmt = select(ComplianceItem).order_by(ComplianceItem.due_date.asc())
-    if application_id: stmt = stmt.where(ComplianceItem.application_id == application_id)
+    if application_id is not None: stmt = stmt.where(ComplianceItem.application_id == application_id)
     rows = db.scalars(stmt).all()
-    return [{"id": r.id, "application_id": r.application_id, "application_no": (db.get(Application, r.application_id).application_no if db.get(Application, r.application_id) else ""), "institution_name": (db.get(Application, r.application_id).institution_name if db.get(Application, r.application_id) else ""), "title": r.title, "category": r.category, "due_date": r.due_date, "status": r.status, "assigned_to": r.assigned_to, "notes": r.notes} for r in rows]
+    now = utcnow()
+    for item in rows:
+        effective = _effective_compliance_status(item)
+        if effective == "Overdue" and item.status not in {"Overdue", "Compliant", "Non-Compliant"}:
+            item.status = "Overdue"; item.updated_at = now
+            db.add(ComplianceStatusHistory(compliance_item_id=item.id, from_status=None, to_status="Overdue",
+                note="Automatically marked overdue because the due date passed while unresolved.", changed_by="system"))
+    db.commit()
+    return [_compliance_out(r, db) for r in rows]
 
 @app.post("/api/v1/compliance", status_code=201)
 def create_compliance(payload: ComplianceCreate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "compliance_officer"))):
     app_item = db.get(Application, payload.application_id)
     if not app_item: raise HTTPException(404, "Application not found")
     if user.role == "compliance_officer" and app_item.current_stage != "Compliance": raise HTTPException(403, "Compliance officers can create tasks only for applications in Compliance.")
-    item = ComplianceItem(**payload.model_dump(), status="Pending")
-    db.add(item); db.flush(); audit(db, "COMPLIANCE_CREATED", user.full_name, item.application_id, item.title); db.commit(); db.refresh(item)
-    return {"id": item.id, "application_id": item.application_id, "title": item.title, "category": item.category, "due_date": item.due_date, "status": item.status, "assigned_to": item.assigned_to, "notes": item.notes}
+    title = payload.title.strip()
+    if db.scalar(select(ComplianceItem.id).where(ComplianceItem.application_id == app_item.id, ComplianceItem.title == title)):
+        raise HTTPException(409, "A compliance task with this title already exists for the application.")
+    if payload.category not in {"Document Validity", "Undertaking", "Infrastructure", "Faculty", "Approval Condition", "Other", "Document validity", "Faculty compliance", "Regulatory condition"}:
+        raise HTTPException(422, "Select a supported compliance category.")
+    item = ComplianceItem(application_id=app_item.id, title=title, category=payload.category,
+        due_date=payload.due_date, assigned_to=payload.assigned_to or user.full_name, notes=payload.notes, status="Pending")
+    db.add(item); db.flush()
+    db.add(ComplianceStatusHistory(compliance_item_id=item.id, from_status=None, to_status="Pending", note="Task created.", changed_by=user.full_name))
+    audit(db, "COMPLIANCE_CREATED", user.full_name, item.application_id, item.title)
+    db.commit(); db.refresh(item)
+    return _compliance_out(item, db)
 
 @app.patch("/api/v1/compliance/{item_id}")
 def update_compliance(item_id: int, payload: ComplianceUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer", "compliance_officer"))):
@@ -821,11 +857,30 @@ def update_compliance(item_id: int, payload: ComplianceUpdate, db: Session = Dep
     if not item: raise HTTPException(404, "Compliance item not found")
     app_item = db.get(Application, item.application_id)
     if user.role == "compliance_officer" and (not app_item or app_item.current_stage != "Compliance"): raise HTTPException(403, "Compliance officers can update items only while the application is in Compliance.")
-    for key, value in payload.model_dump(exclude_unset=True).items(): setattr(item, key, value)
+    changes = payload.model_dump(exclude_unset=True)
+    new_status = changes.get("status")
+    allowed = {"Pending", "Under Review", "Compliant", "Non-Compliant", "Overdue"}
+    if new_status is not None and new_status not in allowed:
+        raise HTTPException(422, "Unsupported compliance status.")
+    if new_status == "Non-Compliant" and not (changes.get("notes") or item.notes or "").strip():
+        raise HTTPException(422, "Add an explanation in notes before marking a task Non-Compliant.")
+    old_status = _effective_compliance_status(item)
+    for key, value in changes.items(): setattr(item, key, value)
+    if "due_date" in changes and item.due_date and safe_dt(item.due_date) < utcnow() and item.status not in {"Compliant", "Non-Compliant"}:
+        item.status = "Overdue"
     item.updated_at = utcnow()
-    audit(db, "COMPLIANCE_UPDATED", user.full_name, item.application_id, f"{item.title}: {item.status}")
+    if item.status != old_status:
+        db.add(ComplianceStatusHistory(compliance_item_id=item.id, from_status=old_status, to_status=item.status,
+            note=item.notes, changed_by=user.full_name))
+    audit(db, "COMPLIANCE_UPDATED", user.full_name, item.application_id, f"{item.title}: {old_status} -> {item.status}")
     db.commit(); db.refresh(item)
-    return {"id": item.id, "application_id": item.application_id, "title": item.title, "category": item.category, "due_date": item.due_date, "status": item.status, "assigned_to": item.assigned_to, "notes": item.notes}
+    return _compliance_out(item, db)
+
+@app.get("/api/v1/compliance/{item_id}/history")
+def compliance_history(item_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
+    if not db.get(ComplianceItem, item_id): raise HTTPException(404, "Compliance item not found")
+    rows = db.scalars(select(ComplianceStatusHistory).where(ComplianceStatusHistory.compliance_item_id == item_id).order_by(ComplianceStatusHistory.changed_at.desc())).all()
+    return [{"from_status": r.from_status, "to_status": r.to_status, "note": r.note, "changed_by": r.changed_by, "changed_at": r.changed_at} for r in rows]
 
 @app.get("/api/v1/document-validity")
 def list_document_validity(application_id: int | None = None, db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
