@@ -71,16 +71,17 @@ def _analyse_document(slot_name: str, filename: str, content: bytes, institution
 
 def _send_correction_email(recipient: str, application_no: str, institution_name: str, issues: list[str]) -> bool:
     """Send a college correction email; return False when SMTP is not configured."""
-    host = os.getenv("SMTP_HOST", "").strip()
-    sender = os.getenv("SMTP_FROM", "").strip()
+    # Read from Pydantic settings so values in backend/.env are loaded consistently.
+    host = settings.smtp_host.strip()
+    sender = settings.smtp_from.strip()
     if not host or not sender:
         return False
 
-    port = int(os.getenv("SMTP_PORT", "587"))
-    username = os.getenv("SMTP_USERNAME", "").strip()
-    password = os.getenv("SMTP_PASSWORD", "")
-    use_ssl = os.getenv("SMTP_USE_SSL", "").lower() in {"1", "true", "yes"}
-    use_tls = os.getenv("SMTP_USE_TLS", "true").lower() in {"1", "true", "yes"}
+    port = settings.smtp_port
+    username = settings.smtp_username.strip()
+    password = settings.smtp_password
+    use_ssl = settings.smtp_use_ssl
+    use_tls = settings.smtp_use_tls
     if use_ssl and use_tls:
         raise ValueError("Choose either SMTP_USE_SSL=true or SMTP_USE_TLS=true, not both.")
     if bool(username) != bool(password):
@@ -223,7 +224,7 @@ async def create_college_submission(
         "document_checks": [{"slot": slot_label, "status": "Needs Correction" if any(issue.startswith(slot_label + ":") for issue in all_issues) else ("Manual Review Required" if Path(filename).suffix.lower() in {".png", ".jpg", ".jpeg"} else "Preliminary Checks Passed")} for _, slot_label, filename, _, _ in prepared],
         "issues": all_issues,
         "correction_email_sent": email_sent,
-        "email_delivery_configured": bool(os.getenv("SMTP_HOST", "").strip() and os.getenv("SMTP_FROM", "").strip()),
+        "email_delivery_configured": bool(settings.smtp_host.strip() and settings.smtp_from.strip()),
         "email_delivery_error": email_error,
     }
 
