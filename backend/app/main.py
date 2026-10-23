@@ -63,7 +63,10 @@ def seed_demo_documents(db: Session, application: Application, uploaded_by: str)
     ]
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
+    existing_slots = set(db.scalars(select(DocumentQualityCheck.slot_name).where(DocumentQualityCheck.application_id == application.id)).all())
     for slot, reference in slots:
+        if slot in existing_slots:
+            continue
         lines = ["SYNTHETIC DEMO DOCUMENT", slot, f"Institution: {application.institution_name}",
                  f"Application: {application.application_no}", f"Reference: {reference}",
                  "NOT an official AICTE record. For prototype review only."]
@@ -242,6 +245,11 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         seed_demo_data(db)
+        # Backfill demo review documents for existing applications as well as new ones.
+        # The helper skips any slot that already has a quality-check record.
+        for existing_application in db.scalars(select(Application)).all():
+            seed_demo_documents(db, existing_application, "Synthetic demo generator")
+        db.commit()
         if not db.scalar(select(func.count()).select_from(WorkflowConfiguration)):
             db.add(WorkflowConfiguration(name="Default approval route", stages_json=json.dumps(WORKFLOW_STAGES), active=True, updated_by="system"))
             db.commit()
