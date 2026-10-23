@@ -596,6 +596,9 @@ def run_compliance_automation(db: Session = Depends(get_db),
         "issues_detected": 0, "tasks_created": 0, "tasks_updated": 0,
         "tasks_skipped": 0, "alerts_created": 0, "errors": [], "warnings": [], "issues": []}
     try:
+        # Route generated work to the designated compliance officer so findings become an actionable queue.
+        compliance_owner = db.scalar(select(User).where(User.role == "compliance_officer").order_by(User.id.asc()))
+        compliance_owner_name = compliance_owner.full_name if compliance_owner else "Compliance Officer"
         # Scope limited to records visible to the role. Compliance officers only see their workflow stage.
         app_stmt = select(Application).order_by(Application.submitted_at.desc())
         if user.role == "compliance_officer":
@@ -622,7 +625,7 @@ def run_compliance_automation(db: Session = Depends(get_db),
                 "institution_name": app.institution_name, "requirement": title,
                 "category": category, "detail": detail, "source_id": source_id}
             stats["issues"].append(entry)
-            outcome, task = _automation_task(db, app, title, category, due, detail, user.full_name if user.role == "compliance_officer" else None)
+            outcome, task = _automation_task(db, app, title, category, due, detail, compliance_owner_name)
             stats["tasks_created" if outcome == "created" else "tasks_updated" if outcome == "updated" else "tasks_skipped"] += 1
             if outcome == "created":
                 db.add(Alert(application_id=app.id, title="Compliance task generated",
