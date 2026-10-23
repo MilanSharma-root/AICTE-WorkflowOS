@@ -466,7 +466,6 @@ def update_application(application_id: int, payload: ApplicationUpdate, db: Sess
     db.commit(); db.refresh(item)
     return item
 
-@app.post("/api/v1/applications/{application_id}/transition", response_model=ApplicationOut)
 def try_auto_route_to_evc(db: Session, application: Application, actor: str) -> bool:
     """Route a scrutiny-approved application to the EVC queue once every required
     document checklist item is verified. This creates a queue item, not a visit
@@ -524,6 +523,7 @@ def try_auto_route_to_evc(db: Session, application: Application, actor: str) -> 
     return True
 
 
+@app.post("/api/v1/applications/{application_id}/transition", response_model=ApplicationOut)
 def transition_application(application_id: int, payload: TransitionIn, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "reviewer", "scrutiny_officer", "evc_officer", "sac_shc_officer", "compliance_officer", "final_approval_officer"))):
     item = db.get(Application, application_id)
     if not item: raise HTTPException(404, "Application not found")
