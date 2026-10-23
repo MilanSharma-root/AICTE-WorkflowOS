@@ -751,7 +751,28 @@ def update_evc(visit_id: int, payload: EVCVisitUpdate, db: Session = Depends(get
     if user.role == "evc_officer" and (not app_item or app_item.current_stage not in {"EVC Scheduling", "EVC Visit"}): raise HTTPException(403, "EVC officers can update visits only while the application is in an EVC stage.")
     for key, value in payload.model_dump(exclude_unset=True).items(): setattr(item, key, value)
     audit(db, "EVC_VISIT_UPDATED", user.full_name, item.application_id, f"Status: {item.status}; outcome: {item.outcome or ''}")
-    db.commit(); db.refresh(item)
+
+    # Completing the EVC visit must also hand the application to the next workflow stage.
+    # Merely marking the visit record complete previously left the application on EVC.
+    if app_item and app_item.current_stage == "EVC Visit" and str(item.status).strip().lower() in {"completed", "complete"}:
+        stages = stages_for_application(db, app_item.application_type)
+        if "SAC/SHC Review" not in stages:
+            raise HTTPException(422, "SAC/SHC Review is not configured as the next workflow stage.")
+        operational_stages = [stage for stage in stages if stage not in {"Re-scrutiny", "Returned to Institution", "Approved / Closed", "Rejected"}]
+        if "EVC Visit" not in operational_stages or operational_stages.index("EVC Visit") + 1 >= len(operational_stages) or operational_stages[operational_stages.index("EVC Visit") + 1] != "SAC/SHC Review":
+            raise HTTPException(422, "The configured workflow route does not place SAC/SHC Review immediately after EVC Visit.")
+        old_stage = app_item.current_stage
+        app_item.current_stage = "SAC/SHC Review"
+        app_item.status = "In Review"
+        next_officer = db.scalar(select(User).where(User.role == "sac_shc_officer", User.active.is_(True)).order_by(User.id))
+        if next_officer:
+            app_item.assigned_to = next_officer.full_name
+        db.add(WorkflowEvent(application_id=app_item.id, from_stage=old_stage, to_stage=app_item.current_stage,
+                             status=app_item.status, actor=user.full_name,
+                             note="EVC visit marked complete; handed off to SAC/SHC review"))
+        audit(db, "WORKFLOW_STAGE_HANDOFF", user.full_name, app_item.id,
+              f"EVC visit completed; moved from {old_stage} to {app_item.current_stage}")
+    db.commit(); db.refresh(item); db.refresh(app_item) if app_item else None
     return {"id": item.id, "application_id": item.application_id, "proposed_date": item.proposed_date, "location": item.location, "panel_members": item.panel_members, "status": item.status, "outcome": item.outcome}
 
 @app.get("/api/v1/alerts")
