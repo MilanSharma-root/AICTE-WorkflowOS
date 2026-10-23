@@ -181,24 +181,13 @@ async def create_college_submission(
     _audit(db, "COLLEGE_ACCOUNT_CREATED", institution_name.strip(), application.id, f"College account created for {email}")
     _audit(db, "COLLEGE_APPLICATION_SUBMITTED", institution_name.strip(), application.id,
            f"{application.application_no}; exactly three required documents stored")
+    # Intake checks are advisory. A staff reviewer must explicitly mark a document
+    # incorrect before the college is sent a correction email.
     email_sent = False
     if all_issues:
-        application.status = "Returned"
-        correction_alert = Alert(application_id=application.id, title="Document correction required",
-                                 message=f"{application.application_no}: preliminary document checks found {len(all_issues)} issue(s).",
-                                 severity="High", category="Document Quality")
-        db.add(correction_alert)
-        try:
-            email_sent = _send_correction_email(email, application.application_no, institution_name.strip(), all_issues)
-        except Exception as exc:
-            _audit(db, "CORRECTION_EMAIL_FAILED", "system", application.id, f"SMTP delivery failed: {type(exc).__name__}")
-            correction_alert.message += " Correction email delivery failed; review the audit trail and contact the institution through an approved channel."
-        else:
-            if email_sent:
-                _audit(db, "CORRECTION_EMAIL_SENT", "system", application.id, f"Correction notice sent to {email}")
-                correction_alert.message += " A correction email was sent."
-            else:
-                correction_alert.message += " Email delivery is not configured; contact details are recorded for follow-up."
+        db.add(Alert(application_id=application.id, title="Document review required",
+                     message=f"{application.application_no}: preliminary checks flagged {len(all_issues)} possible issue(s). A staff reviewer must inspect the files.",
+                     severity="Medium", category="Document Quality"))
     db.commit()
     return {
         "application_id": application.id,
@@ -261,6 +250,103 @@ def get_officer_queue(db: Session = Depends(get_db), user: User = Depends(curren
         "application_type": row.application_type, "current_stage": row.current_stage, "status": row.status,
         "priority": row.priority, "state": row.state, "submitted_at": row.submitted_at,
     } for row in rows]}
+
+
+class DocumentReviewUpdate(BaseModel):
+    decision: str = Field(pattern="^(correct|incorrect)$")
+    note: str | None = Field(default=None, max_length=2000)
+
+
+@router.patch("/api/v1/applications/{application_id}/document-quality/{document_id}")
+def review_application_document(
+    application_id: int,
+    document_id: int,
+    payload: DocumentReviewUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    if user.role not in {"admin", "officer", "reviewer", "scrutiny_officer"}:
+        raise HTTPException(403, "Only an authorised intake/scrutiny reviewer may verify these documents")
+    application = db.get(Application, application_id)
+    if not application:
+        raise HTTPException(404, "Application not found")
+    if application.current_stage not in {"Application Intake", "Scrutiny", "Re-scrutiny", "Returned to Institution"}:
+        raise HTTPException(409, "Document intake review is closed for the current workflow stage")
+    check = db.scalar(select(DocumentQualityCheck).where(
+        DocumentQualityCheck.application_id == application_id,
+        DocumentQualityCheck.document_id == document_id,
+    ))
+    record = db.get(DocumentRecord, document_id)
+    if not check or not record:
+        raise HTTPException(404, "Document review record not found")
+    if payload.decision == "incorrect":
+        note = (payload.note or "").strip()
+        if not note:
+            raise HTTPException(422, "Explain what is wrong with this document before returning it")
+        check.status = "Needs Correction"
+        check.findings_json = json.dumps([note])
+        check.checked_at = datetime.now(timezone.utc)
+        application.status = "Returned"
+        profile = db.scalar(select(CollegeProfile).where(CollegeProfile.application_id == application_id))
+        alert = Alert(application_id=application_id, title="Document correction required",
+                      message=f"{check.slot_name} was marked incorrect by {user.full_name}. {note}",
+                      severity="High", category="Document Quality")
+        db.add(alert)
+        email_sent = False
+        if profile and profile.contact_email:
+            try:
+                email_sent = _send_correction_email(profile.contact_email, application.application_no,
+                                                    profile.institution_name, [f"{check.slot_name}: {note}"])
+            except Exception as exc:
+                _audit(db, "CORRECTION_EMAIL_FAILED", user.full_name, application_id,
+                       f"SMTP delivery failed: {type(exc).__name__}")
+            if email_sent:
+                _audit(db, "CORRECTION_EMAIL_SENT", "system", application_id,
+                       f"Reviewer correction notice sent to {profile.contact_email}")
+                alert.message += " Correction email sent."
+            else:
+                alert.message += " Email was not sent; configure SMTP_HOST and SMTP_FROM and check SMTP credentials."
+        _audit(db, "DOCUMENT_MARKED_INCORRECT", user.full_name, application_id,
+               f"{check.slot_name}: {note}")
+        db.commit()
+        return {"document_id": document_id, "status": check.status, "application_status": application.status,
+                "email_sent": email_sent, "message": "Document returned for correction."}
+
+    check.status = "Verified"
+    check.findings_json = json.dumps([])
+    check.checked_at = datetime.now(timezone.utc)
+    _audit(db, "DOCUMENT_MARKED_CORRECT", user.full_name, application_id, check.slot_name)
+    checks = db.scalars(select(DocumentQualityCheck).where(
+        DocumentQualityCheck.application_id == application_id
+    ).order_by(DocumentQualityCheck.id)).all()
+    all_verified = len(checks) == 3 and all(item.status == "Verified" for item in checks)
+    advanced = False
+    if all_verified and application.current_stage in {"Application Intake", "Returned to Institution"}:
+        previous_stage = application.current_stage
+        application.current_stage = "Scrutiny"
+        application.status = "In Review"
+        scrutiny_owner = db.scalar(select(User).where(
+            User.role == "scrutiny_officer", User.active.is_(True)
+        ).order_by(User.id))
+        application.assigned_to = scrutiny_owner.full_name if scrutiny_owner else None
+        db.add(WorkflowEvent(application_id=application_id, from_stage=previous_stage,
+                             to_stage="Scrutiny", status="In Review", actor="system",
+                             note="All three required college documents were explicitly verified by an authorised reviewer; routed to Scrutiny."))
+        if scrutiny_owner:
+            db.add(Alert(application_id=application_id, title="Application assigned to Scrutiny",
+                         message=f"{application.application_no} has passed intake document review and is assigned to {scrutiny_owner.full_name}.",
+                         severity="Medium", category="Workflow Handoff"))
+        else:
+            db.add(Alert(application_id=application_id, title="Scrutiny assignment required",
+                         message=f"{application.application_no} passed document review but no active scrutiny officer is configured.",
+                         severity="High", category="Workflow Handoff"))
+        _audit(db, "INTAKE_DOCUMENTS_VERIFIED_AND_ROUTED", "system", application_id,
+               "All three required documents were marked correct; routed to Scrutiny.")
+        advanced = True
+    db.commit()
+    return {"document_id": document_id, "status": check.status, "application_status": application.status,
+            "all_documents_verified": all_verified, "advanced_to_scrutiny": advanced,
+            "message": "Document verified." if not advanced else "All three documents verified; application moved to Scrutiny."}
 
 
 @router.get("/api/v1/applications/{application_id}/document-quality")
