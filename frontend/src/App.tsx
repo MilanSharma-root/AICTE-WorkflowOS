@@ -137,7 +137,13 @@ export default function App(){
   catch(err){notify(err instanceof Error?err.message:"Could not save stage checklist item");}
  }
  async function updateStageChecklistItem(item:StageChecklistRow,status:string){
-  try{await request("/api/v1/stage-checklist/"+item.id,token,{method:"PATCH",body:JSON.stringify({status,notes:item.notes||null})});const rows=await request<StageChecklistRow[]>("/api/v1/applications/"+item.application_id+"/stage-checklist",token);setStageChecklist(rows);notify("Stage checklist status updated.");}
+  try{
+   const result=await request<{message?:string}>("/api/v1/stage-checklist/"+item.id,token,{method:"PATCH",body:JSON.stringify({status,notes:item.notes||null})});
+   const rows=await request<StageChecklistRow[]>("/api/v1/applications/"+item.application_id+"/stage-checklist",token);
+   setStageChecklist(rows);
+   await loadAll();
+   notify(result.message||"Stage checklist status updated.");
+  }
   catch(err){notify(err instanceof Error?err.message:"Could not update stage checklist");}
  }
  async function createApp(e:FormEvent<HTMLFormElement>){
