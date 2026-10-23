@@ -445,11 +445,7 @@ def delete_application(application_id: int, db: Session = Depends(get_db), user:
     for model in (ApplicationDocumentCheck, DocumentQualityCheck, DocumentValidity,
                   StageChecklistItem, EVCVisit, ComplianceItem, Undertaking,
                   DocumentRecord, WorkflowEvent, Alert, CollegeProfile):
-        db.query(model).filter(model.application_id == item.id).delete(synchronize_session=False) if model is not CollegeProfile else None
-
-    # CollegeProfile is keyed by its linked application but does not use the same
-    # column name as the other application-scoped records.
-    db.query(CollegeProfile).filter(CollegeProfile.application_id == item.id).delete(synchronize_session=False)
+        db.query(model).filter(model.application_id == item.id).delete(synchronize_session=False)
     db.query(AuditEvent).filter(AuditEvent.application_id == item.id).delete(synchronize_session=False)
     db.add(AuditEvent(
         application_id=None, action="APPLICATION_DELETED", actor=user.full_name,
