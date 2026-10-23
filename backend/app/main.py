@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import Base, engine, get_db, SessionLocal
 from app.models import (Alert, Application, AuditEvent, ComplianceItem, DocumentRecord,
-                        EVCVisit, Undertaking, User, WorkflowEvent, WorkflowConfiguration, ApplicationWorkflowRoute, DocumentChecklistTemplate, ApplicationDocumentCheck, DocumentValidity)
+                        EVCVisit, Undertaking, User, WorkflowEvent, WorkflowConfiguration, ApplicationWorkflowRoute, DocumentChecklistTemplate, ApplicationDocumentCheck, DocumentValidity, DocumentQualityCheck, StageChecklistItem)
 from app.schemas import (ApplicationCreate, ApplicationOut, ApplicationUpdate, ComplianceCreate,
                          ComplianceUpdate, EVCVisitCreate, EVCVisitUpdate, LoginIn,
                          TransitionIn, UndertakingCreate, UndertakingUpdate, WorkflowConfigUpdate, ApplicationWorkflowRouteUpdate, DocumentChecklistTemplateUpdate, DocumentCheckUpdate, DocumentValidityCreate, DocumentValidityUpdate)
@@ -392,6 +392,22 @@ def transition_application(application_id: int, payload: TransitionIn, db: Sessi
     if payload.status == "Stage Completed":
         if payload.to_stage != item.current_stage:
             raise HTTPException(422, "Select the current stage to complete it; the system will route it to the next stage.")
+        if item.current_stage in {"Application Intake", "Scrutiny", "Re-scrutiny"}:
+            quality_issues = db.scalars(select(DocumentQualityCheck).where(
+                DocumentQualityCheck.application_id == item.id,
+                DocumentQualityCheck.status == "Needs Correction"
+            )).all()
+            if quality_issues:
+                raise HTTPException(409, "Document correction issues must be resolved before the application can advance.")
+        outstanding = db.scalars(select(StageChecklistItem).where(
+            StageChecklistItem.application_id == item.id,
+            StageChecklistItem.stage == item.current_stage,
+            StageChecklistItem.required.is_(True),
+        )).all()
+        outstanding = [entry for entry in outstanding if entry.status not in {"Verified", "Not Applicable"}]
+        if outstanding:
+            labels = ", ".join(entry.title for entry in outstanding[:5])
+            raise HTTPException(409, f"Required {item.current_stage} checklist items are outstanding: {labels}")
         operational_for_completion = [stage for stage in stages if stage not in {"Re-scrutiny", "Returned to Institution", "Approved / Closed", "Rejected"}]
         if item.current_stage == "Returned to Institution":
             next_stage = "Re-scrutiny" if "Re-scrutiny" in stages else ("Scrutiny" if "Scrutiny" in operational_for_completion else None)
