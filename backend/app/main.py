@@ -1452,24 +1452,23 @@ def update_evc(visit_id: int, payload: EVCVisitUpdate, db: Session = Depends(get
 def list_alerts(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
     sync_deadline_alerts(db)
     query = select(Alert).order_by(Alert.created_at.desc())
-    # Admin and audit roles can inspect the full register; operational roles
-    # see alerts connected to their assigned cases or their workflow stages.
+    # Only admin/auditor gets the global register. Officers see alerts for cases
+    # assigned to them, plus legacy demo assignments addressed to their role label.
     if user.role not in {"admin", "auditor"}:
-        role_stages = {
-            "scrutiny_officer": {"Scrutiny", "Re-scrutiny", "Returned to Institution", "Application Intake"},
-            "evc_officer": {"EVC Scheduling", "EVC Visit"},
-            "sac_shc_officer": {"SAC/SHC Review"},
-            "compliance_officer": {"Compliance"},
-            "final_approval_officer": {"Final Approval", "Approved / Closed"},
+        role_owner_labels = {
+            "officer": {"Case Officer", "Officer"},
+            "reviewer": {"Reviewer"},
+            "scrutiny_officer": {"Scrutiny Officer"},
+            "evc_officer": {"EVC Officer"},
+            "sac_shc_officer": {"SAC/SHC Officer"},
+            "compliance_officer": {"Compliance Officer"},
+            "final_approval_officer": {"Final Approval Officer"},
         }
         if user.role == "college":
             query = query.where(Alert.application_id.is_(None))
         else:
-            stages = role_stages.get(user.role, set())
-            relevant_app_ids = select(Application.id).where(
-                (Application.assigned_to == user.full_name) |
-                (Application.current_stage.in_(stages) if stages else False)
-            )
+            owners = {user.full_name, *role_owner_labels.get(user.role, set())}
+            relevant_app_ids = select(Application.id).where(Application.assigned_to.in_(owners))
             query = query.where(
                 Alert.application_id.in_(relevant_app_ids) |
                 (Alert.application_id.is_(None) & Alert.category.in_(["System", "Security"]))
