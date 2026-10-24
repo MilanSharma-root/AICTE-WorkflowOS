@@ -53,6 +53,8 @@ async function request<T>(path:string, token:string, init:RequestInit = {}):Prom
  return response.json() as Promise<T>;
 }
 const dateText=(value?:string|null)=>value?new Date(value).toLocaleDateString(undefined,{day:"2-digit",month:"short",year:"numeric"}):"—";
+const priorityRank=(value?:string|null)=>({Urgent:0,Critical:0,High:1,Normal:2,Low:3}[(value||"Normal") as "Urgent"|"Critical"|"High"|"Normal"|"Low"]??2);
+const sortApplicationsByPriority=(rows:AppRow[])=>rows.slice().sort((a,b)=>priorityRank(a.priority)-priorityRank(b.priority)||((a.due_date?new Date(a.due_date).getTime():Number.MAX_SAFE_INTEGER)-(b.due_date?new Date(b.due_date).getTime():Number.MAX_SAFE_INTEGER))||a.institution_name.localeCompare(b.institution_name));
 function stageDonutGradient(counts:{stage:string;count:number}[]){const palette=["#2563eb","#7c3aed","#0ea5a4","#16a765","#f59e0b","#ec4899","#64748b"];const total=counts.reduce((sum,item)=>sum+item.count,0);if(!total)return "#e8edf5";let cursor=0;const stops=counts.map((item,index)=>{const start=cursor;cursor+=item.count/total*100;return `${palette[index%palette.length]} ${start}% ${cursor}%`;});return `conic-gradient(${stops.join(",")})`;}
 
 function formatComplianceFinding(detail:string){
@@ -120,7 +122,7 @@ export default function App(){
     request<{templates:{application_type:string;items:{key:string;label:string;required:boolean}[]}[]}>("/api/v1/document-checklists/templates",currentToken).catch(()=>({templates:[]})),
     (meData.role==="admin"||meData.role==="auditor")?request<Audit[]>("/api/v1/audit",currentToken).catch(()=>[]):Promise.resolve([] as Audit[])
    ]);
-   setUser(meData);setSummary(s);setApps(aa);setCompliance(cc);setEvc(ee);setUndertakings(uu);setDocumentValidity(dv);setAlerts(al);setStages(st.stages);setWorkflowName(st.name||"Default approval route");setStageText(st.stages.join("\n"));if(!docAppId&&aa.length)setDocAppId(aa[0].id);
+   setUser(meData);setSummary(s);setApps(sortApplicationsByPriority(aa));setCompliance(cc);setEvc(ee);setUndertakings(uu);setDocumentValidity(dv);setAlerts(al);setStages(st.stages);setWorkflowName(st.name||"Default approval route");setStageText(st.stages.join("\n"));if(!docAppId&&aa.length)setDocAppId(aa[0].id);
    setAutomationStatus(auto);setApplicationRoutes(routeData.routes);setAuditRows(auditData);
    if(checklistData.templates.length){const selected=checklistData.templates.find(t=>t.application_type===checklistType)||checklistData.templates[0];setChecklistType(selected.application_type);setChecklistTemplateText(selected.items.map(item=>item.key+" | "+item.label+" | "+String(item.required)).join("\n"));}
   }catch(e){setError(e instanceof Error?e.message:"Unable to load application data");if(String(e).includes("Sign in")||String(e).includes("token"))logout();}
