@@ -1452,26 +1452,29 @@ def update_evc(visit_id: int, payload: EVCVisitUpdate, db: Session = Depends(get
 def list_alerts(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
     sync_deadline_alerts(db)
     query = select(Alert).order_by(Alert.created_at.desc())
-    # Only admin/auditor gets the global register. Officers see alerts for cases
-    # assigned to them, plus legacy demo assignments addressed to their role label.
+    # Admin/auditor see the global register. Each operational role sees only
+    # alerts explicitly assigned to that role's applications AND relevant to its work.
     if user.role not in {"admin", "auditor"}:
-        role_owner_labels = {
-            "officer": {"Case Officer", "Officer"},
-            "reviewer": {"Reviewer"},
-            "scrutiny_officer": {"Scrutiny Officer"},
-            "evc_officer": {"EVC Officer"},
-            "sac_shc_officer": {"SAC/SHC Officer"},
-            "compliance_officer": {"Compliance Officer"},
-            "final_approval_officer": {"Final Approval Officer"},
+        role_scope = {
+            "officer": ({"Case Officer", "Officer"}, {"Application Intake"}),
+            "reviewer": ({"Reviewer"}, {"Scrutiny", "Re-scrutiny"}),
+            "scrutiny_officer": ({"Scrutiny Officer"}, {"Scrutiny", "Re-scrutiny", "Returned to Institution", "Application Intake"}),
+            "evc_officer": ({"EVC Officer"}, {"EVC Scheduling", "EVC Visit"}),
+            "sac_shc_officer": ({"SAC/SHC Officer"}, {"SAC/SHC Review"}),
+            "compliance_officer": ({"Compliance Officer"}, {"Compliance"}),
+            "final_approval_officer": ({"Final Approval Officer"}, {"Final Approval", "Approved / Closed"}),
         }
         if user.role == "college":
-            query = query.where(Alert.application_id.is_(None))
+            query = query.where(Alert.application_id.is_(None) & Alert.category.in_(["System", "Security"]))
         else:
-            owners = {user.full_name, *role_owner_labels.get(user.role, set())}
-            relevant_app_ids = select(Application.id).where(Application.assigned_to.in_(owners))
+            owners, stages = role_scope.get(user.role, ({user.full_name}, set()))
+            owners = set(owners) | {user.full_name}
+            relevant_app_ids = select(Application.id).where(
+                Application.assigned_to.in_(owners),
+                Application.current_stage.in_(stages) if stages else True,
+            )
             query = query.where(
-                Alert.application_id.in_(relevant_app_ids) |
-                (Alert.application_id.is_(None) & Alert.category.in_(["System", "Security"]))
+                Alert.application_id.in_(relevant_app_ids)
             )
     rows = db.scalars(query).all()
     result = []
