@@ -1451,8 +1451,39 @@ def update_evc(visit_id: int, payload: EVCVisitUpdate, db: Session = Depends(get
 @app.get("/api/v1/alerts")
 def list_alerts(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
     sync_deadline_alerts(db)
-    rows = db.scalars(select(Alert).order_by(Alert.created_at.desc())).all()
-    return [{"id": a.id, "application_id": a.application_id, "application_no": db.get(Application, a.application_id).application_no if a.application_id and db.get(Application, a.application_id) else "", "title": a.title, "message": a.message, "severity": a.severity, "category": a.category, "acknowledged": a.acknowledged, "created_at": a.created_at, "acknowledged_by": a.acknowledged_by} for a in rows]
+    query = select(Alert).order_by(Alert.created_at.desc())
+    # Admin and audit roles can inspect the full register; operational roles
+    # see alerts connected to their assigned cases or their workflow stages.
+    if user.role not in {"admin", "auditor"}:
+        role_stages = {
+            "scrutiny_officer": {"Scrutiny", "Re-scrutiny", "Returned to Institution", "Application Intake"},
+            "evc_officer": {"EVC Scheduling", "EVC Visit"},
+            "sac_shc_officer": {"SAC/SHC Review"},
+            "compliance_officer": {"Compliance"},
+            "final_approval_officer": {"Final Approval", "Approved / Closed"},
+        }
+        if user.role == "college":
+            query = query.where(Alert.application_id.is_(None))
+        else:
+            stages = role_stages.get(user.role, set())
+            relevant_app_ids = select(Application.id).where(
+                (Application.assigned_to == user.full_name) |
+                (Application.current_stage.in_(stages) if stages else False)
+            )
+            query = query.where(
+                Alert.application_id.in_(relevant_app_ids) |
+                (Alert.application_id.is_(None) & Alert.category.in_(["System", "Security"]))
+            )
+    rows = db.scalars(query).all()
+    result = []
+    for alert in rows:
+        application = db.get(Application, alert.application_id) if alert.application_id else None
+        result.append({"id": alert.id, "application_id": alert.application_id,
+            "application_no": application.application_no if application else "",
+            "title": alert.title, "message": alert.message, "severity": alert.severity,
+            "category": alert.category, "acknowledged": alert.acknowledged,
+            "created_at": alert.created_at, "acknowledged_by": alert.acknowledged_by})
+    return result
 
 @app.patch("/api/v1/alerts/{alert_id}/acknowledge")
 def acknowledge_alert(alert_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer"))):
