@@ -7,7 +7,7 @@ import csv, io, json, threading, random
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
-from sqlalchemy import func, select, or_
+from sqlalchemy import func, select, or_, delete
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import Base, engine, get_db, SessionLocal
@@ -222,7 +222,7 @@ def ensure_stage_checklist(db: Session, application: Application, stage: str):
                                       updated_by="system"))
 
 
-SYNTHETIC_APPLICATION_TARGET = 900
+SYNTHETIC_APPLICATION_TARGET = 20
 SYNTHETIC_PREFIX = "SYN-2026-"
 
 def seed_synthetic_applications(db: Session) -> int:
@@ -231,8 +231,23 @@ def seed_synthetic_applications(db: Session) -> int:
         return 0
     if not db.scalar(select(User.id).where(User.username == "admin@demo.local")):
         return 0
-    existing_numbers = set(db.scalars(select(Application.application_no).where(
-        Application.application_no.like(f"{SYNTHETIC_PREFIX}%"))).all())
+    existing_apps = db.scalars(select(Application).where(
+        Application.application_no.like(f"{SYNTHETIC_PREFIX}%")).order_by(Application.application_no)).all()
+    # Keep only the first 20 explicitly synthetic demo applications. Never touch
+    # real application numbers or records outside the synthetic prefix.
+    extra_apps = existing_apps[SYNTHETIC_APPLICATION_TARGET:]
+    if extra_apps:
+        extra_ids = [app.id for app in extra_apps]
+        compliance_ids = db.scalars(select(ComplianceItem.id).where(ComplianceItem.application_id.in_(extra_ids))).all()
+        if compliance_ids:
+            db.execute(delete(ComplianceStatusHistory).where(ComplianceStatusHistory.compliance_item_id.in_(compliance_ids)))
+        for model in (AuditEvent, WorkflowEvent, Alert, ApplicationDocumentCheck, DocumentValidity,
+                      DocumentQualityCheck, StageChecklistItem, CollegeProfile, ComplianceItem,
+                      Undertaking, EVCVisit, DocumentRecord):
+            db.execute(delete(model).where(model.application_id.in_(extra_ids)))
+        db.execute(delete(Application).where(Application.id.in_(extra_ids)))
+        db.flush()
+    existing_numbers = {app.application_no for app in existing_apps[:SYNTHETIC_APPLICATION_TARGET]}
     if len(existing_numbers) >= SYNTHETIC_APPLICATION_TARGET:
         return 0
     rng = random.Random(20261024)
