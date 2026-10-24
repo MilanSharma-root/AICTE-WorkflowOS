@@ -694,3 +694,24 @@ tbody tr:last-child td { border-bottom: 0; }
 .sidebar>nav::-webkit-scrollbar-thumb{background:#47627f;border-radius:8px}
 .sidebar>nav::-webkit-scrollbar-thumb:hover{background:#6984a1}
 @media(max-width:800px){.sidebar>nav{overflow-y:auto;overflow-x:hidden}}
+
+.officer-report-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.officer-report-metrics{padding:18px 18px 8px}
+.officer-report-panel .report-disclaimer{padding:0 18px}
+.officer-history-heading{margin:20px 18px 12px;color:#1c3551;font-size:14px}
+.officer-history-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:0 18px 20px}
+.officer-history-card{min-width:0;border:1px solid #e0e8f2;border-radius:10px;background:#fbfcfe;overflow:hidden}
+.officer-history-card-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:13px 14px;background:#f3f7fc;border-bottom:1px solid #e4ebf4}
+.officer-history-card-head b{display:block;color:#203b58;font-size:12px}
+.officer-history-card-head small{display:block;color:#70839a;font-size:10px;margin-top:4px;text-transform:capitalize}
+.officer-history-card-head>span{font-size:10px;color:#55718f;white-space:nowrap}
+.officer-history-event{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:12px 14px;border-bottom:1px solid #e9eef5}
+.officer-history-event:last-child{border-bottom:0}
+.officer-history-event b{display:block;font-size:11px;color:#304962;line-height:1.45}
+.officer-history-event small{display:block;margin-top:4px;color:#72839a;font-size:10px;line-height:1.5;overflow-wrap:anywhere}
+.officer-history-event time{font-size:9px;color:#7d8da1;text-align:right;white-space:nowrap}
+.officer-action-breakdown{display:grid;gap:4px;white-space:normal;min-width:170px}
+.officer-action-breakdown span{font-size:10px;color:#667a91}
+.officer-action-breakdown b{color:#2c4868}
+@media(max-width:850px){.officer-history-grid{grid-template-columns:1fr}.officer-report-actions{justify-content:flex-end}}
+@media(max-width:600px){.officer-report-actions{width:100%}.officer-report-actions button{flex:1}.officer-history-event{grid-template-columns:1fr}.officer-history-event time{text-align:left}}
