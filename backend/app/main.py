@@ -1451,42 +1451,25 @@ def update_evc(visit_id: int, payload: EVCVisitUpdate, db: Session = Depends(get
 @app.get("/api/v1/alerts")
 def list_alerts(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
     sync_deadline_alerts(db)
-    query = select(Alert).order_by(Alert.created_at.desc())
-    # Admin/auditor see the global register. Each operational role sees only
-    # alerts explicitly assigned to that role's applications AND relevant to its work.
+    # Keep the operational alert inbox manageable without deleting historical DB records.
+    # The latest 600 matching alerts are returned; admin/auditor can see the global register.
+    query = select(Alert).order_by(Alert.created_at.desc(), Alert.id.desc())
     if user.role not in {"admin", "auditor"}:
-        role_scope = {
-            "officer": ({"Case Officer", "Officer"}, {"Application Intake"}),
-            "reviewer": ({"Reviewer"}, {"Scrutiny", "Re-scrutiny"}),
-            "scrutiny_officer": ({"Scrutiny Officer"}, {"Scrutiny", "Re-scrutiny", "Returned to Institution", "Application Intake"}),
-            "evc_officer": ({"EVC Officer"}, {"EVC Scheduling", "EVC Visit"}),
-            "sac_shc_officer": ({"SAC/SHC Officer"}, {"SAC/SHC Review"}),
-            "compliance_officer": ({"Compliance Officer"}, {"Compliance"}),
-            "final_approval_officer": ({"Final Approval Officer"}, {"Final Approval", "Approved / Closed"}),
-        }
         if user.role == "college":
             query = query.where(Alert.application_id.is_(None) & Alert.category.in_(["System", "Security"]))
         else:
-            owners, stages = role_scope.get(user.role, ({user.full_name}, set()))
-            owners = set(owners) | {user.full_name}
-            relevant_app_ids = select(Application.id).where(
-                Application.assigned_to.in_(owners),
-                Application.current_stage.in_(stages) if stages else True,
-            )
-            query = query.where(Alert.application_id.in_(relevant_app_ids))
-            # Scope the alert itself as well as the application. An application
-            # can have compliance/ EVC alerts while its stage/assignee is stale.
-            # Do not leak those unrelated alert types into an officer's inbox.
+            # Route alert types to the officer responsible for that workstream.
+            # Filter by alert content/category, not the application's possibly stale stage/assignee.
             alert_terms = {
                 "officer": ("intake", "application submitted", "application received"),
                 "reviewer": ("scrutiny", "re-scrutiny", "review", "returned to institution"),
                 "scrutiny_officer": ("scrutiny", "re-scrutiny", "document screening", "returned to institution", "application intake", "application submitted"),
                 "evc_officer": ("evc", "expert visit", "visit scheduling", "site visit"),
                 "sac_shc_officer": ("sac/shc", "sac", "shc", "committee review"),
-                "compliance_officer": ("compliance", "undertaking", "document expiring", "expired document", "deadline"),
+                "compliance_officer": ("compliance", "undertaking", "document expiring", "expired document", "document validity", "deadline"),
                 "final_approval_officer": ("final approval", "approved", "approval decision"),
             }
-            terms = alert_terms.get(user.role)
+            terms = alert_terms.get(user.role, ())
             if terms:
                 query = query.where(or_(*[
                     func.lower(Alert.title).contains(term) |
@@ -1494,6 +1477,9 @@ def list_alerts(db: Session = Depends(get_db), user: User = Depends(require_role
                     func.lower(Alert.category).contains(term)
                     for term in terms
                 ]))
+            else:
+                query = query.where(Alert.application_id.is_(None) & Alert.category.in_(["System", "Security"]))
+    query = query.limit(600)
     rows = db.scalars(query).all()
     result = []
     for alert in rows:
