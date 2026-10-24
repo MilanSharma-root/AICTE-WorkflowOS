@@ -94,7 +94,7 @@ export default function App(){
  const [overviewAppId,setOverviewAppId]=useState<number|null>(null);
  const [overviewApplicationSearch,setOverviewApplicationSearch]=useState("");
  const filteredOverviewApps=apps.filter(a=>[a.application_no,String(a.id),a.institution_name].some(value=>value.toLowerCase().includes(overviewApplicationSearch.trim().toLowerCase())));
- const selectedOverviewApp=apps.find(a=>a.id===overviewAppId)||apps[0];
+ const selectedOverviewApp=filteredOverviewApps.find(a=>a.id===overviewAppId)||filteredOverviewApps[0]||apps[0];
  const [detailQuality,setDetailQuality]=useState<QualityCheck[]>([]),[detailHistory,setDetailHistory]=useState<WorkflowEvent[]>([]),[stageChecklist,setStageChecklist]=useState<StageChecklistRow[]>([]);
  const [workflowHistory,setWorkflowHistory]=useState<WorkflowEvent[]>([]),[historyBusy,setHistoryBusy]=useState(false),[historyError,setHistoryError]=useState("");
  const canWrite=user?.role==="admin"||user?.role==="officer";
