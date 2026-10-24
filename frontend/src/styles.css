@@ -500,3 +500,27 @@ tbody tr:last-child td { border-bottom: 0; }
 .home-stage-list{display:flex;flex-direction:column;gap:15px}.home-stage-list button{display:grid;grid-template-columns:minmax(100px,1fr) minmax(70px,1.3fr) 35px;align-items:center;gap:12px;border:0;background:transparent;color:inherit;text-align:left;padding:0;cursor:pointer}.home-stage-list button span{font-size:12px}.home-stage-list button b{text-align:right;font-size:13px}.home-stage-track{height:7px;border-radius:10px;background:#edf1f5;overflow:hidden}.home-stage-track i{display:block;height:100%;border-radius:10px;background:#527da9}.home-view-all{margin-top:20px}.home-recent-alerts{display:flex;flex-direction:column}.home-alert-row{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:12px;align-items:start;padding:14px 0;border-bottom:1px solid var(--border-color,#e0e6ed)}.home-alert-row:last-child{border-bottom:0}.home-alert-dot{width:9px;height:9px;border-radius:50%;margin-top:6px;background:#7c9bbd}.home-alert-dot.high{background:#d97706}.home-alert-dot.critical{background:#dc2626}.home-alert-row b{font-size:13px}.home-alert-row p{margin:5px 0;font-size:13px;line-height:1.45;color:var(--muted,#64748b)}.home-alert-row small{font-size:11px;color:var(--muted,#64748b)}
 @media(max-width:1000px){.home-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.home-content-grid{grid-template-columns:1fr}.home-hero-mark{min-width:130px}}
 @media(max-width:620px){.home-hero{padding:22px;flex-direction:column;align-items:flex-start}.home-hero-mark{display:none}.home-quick-actions{grid-template-columns:1fr}.home-metric-grid{gap:9px}.home-metric{padding:13px}.home-metric strong{font-size:25px}.home-alert-row{grid-template-columns:10px minmax(0,1fr)}.home-alert-row>.status-pill{grid-column:2}}
+
+/* Focused scrutiny review: keep the application header and document actions only. */
+.scrutiny-documents-only .college-detail-summary,
+.scrutiny-documents-only .automation-trace-panel,
+.scrutiny-documents-only .detail-subheading,
+.scrutiny-documents-only .workflow-vertical,
+.scrutiny-documents-only .detail-columns>section:nth-child(2),
+.scrutiny-documents-only .stage-checklist-panel{display:none!important}
+.scrutiny-documents-only .detail-columns{display:block;grid-template-columns:minmax(0,1fr);margin:0;padding:18px 22px 24px;gap:0}
+.scrutiny-documents-only .detail-columns>section:first-child{min-width:0;border:1px solid #e1e9f3;border-radius:14px;overflow:hidden;background:#fff}
+.scrutiny-documents-only .detail-columns>section:first-child>.panel-heading{padding:20px 22px;background:#f8fbff;border-bottom:1px solid #e6edf5}
+.scrutiny-documents-only .detail-columns>section:first-child>.panel-heading h2{font-size:19px;letter-spacing:-.25px}
+.scrutiny-documents-only .detail-columns>section:first-child>.panel-heading p{margin-top:5px}
+.scrutiny-documents-only .quality-row{padding:20px 22px;gap:16px;align-items:flex-start}
+.scrutiny-documents-only .quality-row>div:first-child{min-width:0;flex:1}
+.scrutiny-documents-only .quality-row>div:first-child>strong{font-size:14px;color:#172b49}
+.scrutiny-documents-only .quality-row>div:first-child>small{display:block;margin-top:7px;color:#71839c}
+.scrutiny-documents-only .quality-row>div:first-child>p{margin:10px 0;color:#536781;line-height:1.55}
+.scrutiny-documents-only .quality-row .inline-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.scrutiny-documents-only .quality-row .inline-actions .secondary-button{min-height:38px;border-radius:9px;padding:9px 14px}
+.scrutiny-documents-only .college-detail-panel>.panel-heading:first-child{padding:20px 24px}
+.scrutiny-documents-only .college-detail-panel>.panel-heading:first-child h2{font-size:22px}
+.scrutiny-documents-only .college-detail-panel>.panel-heading:first-child p{margin-top:6px}
+@media(max-width:700px){.scrutiny-documents-only .detail-columns{padding:12px}.scrutiny-documents-only .quality-row{flex-direction:column;padding:16px}.scrutiny-documents-only .quality-row>.status-pill{align-self:flex-start}.scrutiny-documents-only .quality-row .inline-actions{width:100%}.scrutiny-documents-only .quality-row .inline-actions button{flex:1}}
