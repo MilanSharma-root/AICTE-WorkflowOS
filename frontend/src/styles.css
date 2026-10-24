@@ -684,3 +684,13 @@ tbody tr:last-child td { border-bottom: 0; }
 .compliance-search-field input{font-size:13px}
 .compliance-search-toolbar .queue-result-count{min-width:72px;text-align:right}
 @media(max-width:650px){.compliance-search-toolbar{align-items:stretch;flex-direction:column;padding:14px 14px 4px}.compliance-search-toolbar .queue-result-count{align-self:flex-end;text-align:right}}
+
+/* Keep the workspace navigation independently scrollable from the profile footer. */
+.sidebar{overflow:hidden;min-height:0}
+.sidebar>.brand,.sidebar>.workspace,.sidebar>.nav-label,.sidebar>.sidebar-bottom{flex-shrink:0}
+.sidebar>nav{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#47627f transparent;padding-right:3px;align-content:start}
+.sidebar>nav::-webkit-scrollbar{width:5px}
+.sidebar>nav::-webkit-scrollbar-track{background:transparent}
+.sidebar>nav::-webkit-scrollbar-thumb{background:#47627f;border-radius:8px}
+.sidebar>nav::-webkit-scrollbar-thumb:hover{background:#6984a1}
+@media(max-width:800px){.sidebar>nav{overflow-y:auto;overflow-x:hidden}}
