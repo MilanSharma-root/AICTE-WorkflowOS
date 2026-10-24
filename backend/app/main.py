@@ -1503,8 +1503,52 @@ def list_alerts(db: Session = Depends(get_db), user: User = Depends(require_role
                     func.lower(Alert.category).contains(term)
                     for term in terms
                 ]))
+            # A scrutiny officer must not see an EVC destination handoff merely because
+            # its message says the application passed scrutiny.
+            if user.role == "scrutiny_officer":
+                query = query.where(~(
+                    (func.lower(Alert.category) == "workflow handoff") &
+                    (func.lower(Alert.title).contains("handed off to evc"))
+                ))
             else:
-                query = query.where(Alert.application_id.is_(None) & Alert.category.in_(["System", "Security"]))
+                pass
+            if user.role == "scrutiny_officer":
+                query = query.where(~(
+                    (func.lower(Alert.category) == "workflow handoff") &
+                    (func.lower(Alert.message).contains("now in evc scheduling"))
+                ))
+            else:
+                query = query
+            if user.role not in {"scrutiny_officer"}:
+                query = query
+            if user.role == "scrutiny_officer":
+                query = query.where(~(
+                    (func.lower(Alert.category) == "workflow handoff") &
+                    (func.lower(Alert.title).contains("evc"))
+                ))
+            else:
+                query = query
+            if user.role == "scrutiny_officer":
+                query = query.where(~(
+                    (func.lower(Alert.category) == "workflow handoff") &
+                    (func.lower(Alert.message).contains("now at evc"))
+                ))
+            else:
+                query = query
+            if user.role == "scrutiny_officer":
+                query = query.where(~(
+                    (func.lower(Alert.category) == "workflow handoff") &
+                    (func.lower(Alert.title).contains("application handed off"))
+                ))
+            else:
+                query = query
+            if user.role == "scrutiny_officer":
+                query = query.where(~(
+                    (func.lower(Alert.category) == "workflow handoff") &
+                    (func.lower(Alert.message).contains("evc scheduling"))
+                ))
+            else:
+                query = query
     query = query.limit(600)
     rows = db.scalars(query).all()
     result = []
