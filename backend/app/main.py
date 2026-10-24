@@ -1782,6 +1782,31 @@ def application_risk(application_id: int, db: Session = Depends(get_db), user: U
             "band": "High" if score >= 60 else ("Medium" if score >= 30 else "Low"),
             "factors": factors, "disclaimer": "Explainable triage aid only; not an AICTE decision or statutory finding."}
 
+@app.get("/api/v1/reports/officer-activity")
+def officer_activity_report(db: Session = Depends(get_db), user: User = Depends(require_roles("admin"))):
+    """Admin-only officer accountability report built from recorded audit events."""
+    users = db.scalars(select(User).order_by(User.role, User.full_name)).all()
+    events = db.scalars(select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(5000)).all()
+    by_actor = {}
+    for event in events:
+        actor = event.actor or "system"
+        row = by_actor.setdefault(actor, {"actor": actor, "total_actions": 0, "last_activity": None, "action_counts": {}, "recent_events": []})
+        row["total_actions"] += 1
+        row["action_counts"][event.action] = row["action_counts"].get(event.action, 0) + 1
+        if row["last_activity"] is None:
+            row["last_activity"] = event.created_at
+        if len(row["recent_events"]) < 12:
+            row["recent_events"].append({"id": event.id, "application_id": event.application_id, "action": event.action, "details": event.details, "created_at": event.created_at})
+    officers = []
+    for officer in users:
+        row = by_actor.get(officer.full_name, {"total_actions": 0, "last_activity": None, "action_counts": {}, "recent_events": []})
+        officers.append({"user_id": officer.id, "username": officer.username, "full_name": officer.full_name,
+            "role": officer.role, "active": officer.active, "total_actions": row["total_actions"],
+            "last_activity": row["last_activity"], "action_counts": row["action_counts"], "recent_events": row["recent_events"]})
+    return {"officers": officers, "total_audit_events_reviewed": len(events),
+            "history_limit": 5000, "note": "This report reflects actions recorded in the audit log; actions not instrumented in the audit log will not appear."}
+
+
 @app.get("/api/v1/audit")
 def list_audit(limit: int = 100, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "auditor"))):
     rows = db.scalars(select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(min(max(limit,1),500))).all()
