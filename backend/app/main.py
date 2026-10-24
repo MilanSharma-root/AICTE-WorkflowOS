@@ -1204,9 +1204,11 @@ def _effective_compliance_status(item: ComplianceItem) -> str:
 
 def _compliance_out(item: ComplianceItem, db: Session) -> dict:
     application = db.get(Application, item.application_id)
+    college_profile = db.scalar(select(CollegeProfile).where(CollegeProfile.application_id == item.application_id))
     return {"id": item.id, "application_id": item.application_id,
         "application_no": application.application_no if application else "",
         "institution_name": application.institution_name if application else "",
+        "contact_email": college_profile.contact_email if college_profile else "",
         "title": item.title, "category": item.category, "due_date": item.due_date,
         "status": _effective_compliance_status(item), "assigned_to": item.assigned_to,
         "notes": item.notes, "updated_at": item.updated_at, "created_at": item.created_at}
