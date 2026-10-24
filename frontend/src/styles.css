@@ -597,3 +597,28 @@ tbody tr:last-child td { border-bottom: 0; }
 .compliance-review-modal .modal-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:10px;padding:20px 28px 24px;margin-top:22px;background:#f8fafd;border-top:1px solid #e3ebf4}
 .compliance-review-modal .modal-actions button{min-height:42px;border-radius:10px;padding:10px 16px;font-weight:700}
 @media(max-width:650px){.compliance-review-modal .modal-heading{padding:18px}.compliance-review-modal .compliance-review-summary{grid-template-columns:1fr;padding:16px 18px}.compliance-review-modal>label{margin:18px 18px 0}.compliance-review-modal .form-row{grid-template-columns:1fr;margin:18px 18px 0}.compliance-review-modal .notice-box{margin:18px 18px 0}.compliance-review-modal .modal-actions{padding:16px 18px}.compliance-review-modal .modal-actions button{flex:1 1 180px}}
+
+.compliance-review-modal{width:min(820px,calc(100vw - 28px));max-height:90vh;display:flex;flex-direction:column;overflow:hidden}
+.compliance-review-modal .modal-heading{flex:0 0 auto;padding:22px 26px;background:#f5f8fc;border-bottom:1px solid #e0e8f2}
+.compliance-review-modal .modal-heading h2{font-size:24px;color:#132b49;margin:6px 0}
+.compliance-review-modal .modal-heading p{color:#526982;font-size:14px;line-height:1.5;margin:6px 0 0}
+.compliance-review-body{overflow-y:auto;padding:20px 26px 24px}
+.compliance-review-modal .compliance-review-summary{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:10px;padding:0;margin:0 0 22px;background:transparent;border:0}
+.compliance-review-modal .compliance-review-summary>div{padding:13px;border:1px solid #dce6f1;background:#f8fafd;border-radius:11px}
+.compliance-review-modal .compliance-review-summary small{font-size:10px;letter-spacing:.07em;color:#687d96}
+.compliance-review-modal .compliance-review-summary strong{font-size:13px;line-height:1.45;color:#183451}
+.compliance-review-step{display:flex;align-items:flex-start;gap:12px;margin:0 0 18px}
+.review-step-number{display:flex;align-items:center;justify-content:center;flex:0 0 28px;height:28px;border-radius:50%;background:#e6effa;color:#174a7b;font-size:13px;font-weight:800}
+.compliance-review-step h3{margin:2px 0 5px;font-size:16px;color:#193451}
+.compliance-review-step p,.review-label-help{display:block;color:#647890;font-size:12px;font-weight:450;line-height:1.55;margin:4px 0 0}
+.compliance-review-modal>label{margin:18px 0 0;gap:7px;color:#243e5a;font-size:13px}
+.compliance-review-modal input,.compliance-review-modal select,.compliance-review-modal textarea{color:#193451;background:#fff;border-color:#c9d7e7;border-radius:10px;font-size:14px}
+.compliance-review-modal textarea{min-height:100px}
+.compliance-review-modal .form-row{margin:18px 0 0;gap:14px}
+.compliance-review-modal .form-row label{display:flex;flex-direction:column;gap:7px;color:#243e5a;font-size:13px}
+.compliance-review-next{display:flex;gap:12px;margin-top:20px;padding:15px 16px;background:#eff6ff;border:1px solid #d7e7f8;border-radius:11px;color:#234766}
+.compliance-review-next strong{font-size:13px}
+.compliance-review-next p{font-size:12px;line-height:1.6;margin:5px 0 0;color:#506a84}
+.compliance-review-modal .modal-actions{flex:0 0 auto;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;padding:16px 26px 20px;margin:0;background:#f8fafd;border-top:1px solid #e2eaf3}
+.compliance-review-modal .modal-actions button{min-height:42px;border-radius:9px;font-size:13px;font-weight:750}
+@media(max-width:650px){.compliance-review-modal{max-height:94vh}.compliance-review-modal .modal-heading{padding:17px}.compliance-review-body{padding:16px}.compliance-review-modal .compliance-review-summary{grid-template-columns:1fr}.compliance-review-modal .form-row{grid-template-columns:1fr}.compliance-review-modal .modal-actions{padding:14px 16px}.compliance-review-modal .modal-actions button{flex:1 1 180px}}
