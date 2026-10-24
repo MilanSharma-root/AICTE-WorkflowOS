@@ -1289,6 +1289,53 @@ def create_compliance(payload: ComplianceCreate, db: Session = Depends(get_db), 
     db.commit(); db.refresh(item)
     return _compliance_out(item, db)
 
+@app.post("/api/v1/compliance/{item_id}/send-correction-email")
+def send_compliance_correction_email(item_id: int, payload: dict, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "compliance_officer"))):
+    import os, smtplib
+    from email.message import EmailMessage
+    item = db.get(ComplianceItem, item_id)
+    if not item:
+        raise HTTPException(404, "Compliance task not found")
+    app_item = db.get(Application, item.application_id)
+    if not app_item:
+        raise HTTPException(404, "Linked application not found")
+    recipient = str(payload.get("to", "")).strip()
+    subject = str(payload.get("subject", "")).strip()
+    body = str(payload.get("body", "")).strip()
+    if not recipient or "@" not in recipient or not subject or not body:
+        raise HTTPException(422, "Enter a valid college email, subject and message.")
+    host = os.getenv("SMTP_HOST", "").strip()
+    port = int(os.getenv("SMTP_PORT", "587"))
+    username = os.getenv("SMTP_USERNAME", "").strip()
+    password = os.getenv("SMTP_PASSWORD", "")
+    sender = os.getenv("SMTP_FROM", username).strip()
+    use_ssl = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
+    use_tls = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+    if not host or not sender:
+        raise HTTPException(503, "Email is not configured. Set SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD and SMTP_FROM in the backend environment.")
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = sender
+    message["To"] = recipient
+    message.set_content(body)
+    try:
+        if use_ssl:
+            with smtplib.SMTP_SSL(host, port, timeout=20) as server:
+                if username: server.login(username, password)
+                server.send_message(message)
+        else:
+            with smtplib.SMTP(host, port, timeout=20) as server:
+                server.ehlo()
+                if use_tls: server.starttls(); server.ehlo()
+                if username: server.login(username, password)
+                server.send_message(message)
+    except Exception as exc:
+        raise HTTPException(502, "Email delivery failed. Check SMTP configuration and recipient address.") from exc
+    db.add(AuditEvent(application_id=app_item.id, action="Compliance correction email sent", actor=user.full_name, details=f"Compliance task #{item.id}; recipient={recipient}; subject={subject}"))
+    db.commit()
+    return {"sent": True, "recipient": recipient, "message": "Correction email sent successfully."}
+
+
 @app.patch("/api/v1/compliance/{item_id}")
 def update_compliance(item_id: int, payload: ComplianceUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer", "compliance_officer"))):
     item = db.get(ComplianceItem, item_id)
