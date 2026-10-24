@@ -1149,7 +1149,33 @@ def dashboard_summary(db: Session = Depends(get_db), user: User = Depends(requir
     stage_rows = db.execute(select(Application.current_stage, func.count()).group_by(Application.current_stage)).all()
     evc_upcoming = db.scalar(select(func.count()).select_from(EVCVisit).where(EVCVisit.status.in_(["Proposed", "Scheduled"]))) or 0
     compliance_open = db.scalar(select(func.count()).select_from(ComplianceItem).where(ComplianceItem.status != "Verified")) or 0
-    alerts_open = db.scalar(select(func.count()).select_from(Alert).where(Alert.acknowledged.is_(False))) or 0
+    # Match the sidebar badge to the signed-in officer's alert inbox, not the global DB total.
+    alert_count_query = select(func.count()).select_from(Alert).where(Alert.acknowledged.is_(False))
+    if user.role not in {"admin", "auditor"}:
+        if user.role == "college":
+            alert_count_query = alert_count_query.where(Alert.application_id.is_(None), Alert.category.in_(["System", "Security"]))
+        else:
+            role_alert_terms = {
+                "officer": ("intake", "application submitted", "application received"),
+                "reviewer": ("scrutiny", "re-scrutiny", "review", "returned to institution"),
+                "scrutiny_officer": ("scrutiny", "re-scrutiny", "document screening", "returned to institution", "application intake", "application submitted"),
+                "evc_officer": ("evc", "expert visit", "visit scheduling", "site visit"),
+                "sac_shc_officer": ("sac/shc", "sac", "shc", "committee review"),
+                "compliance_officer": ("compliance", "undertaking", "document expiring", "expired document", "document validity", "deadline"),
+                "final_approval_officer": ("final approval", "approved", "approval decision"),
+            }
+            terms = role_alert_terms.get(user.role, ())
+            if terms:
+                alert_count_query = alert_count_query.where(or_(*[
+                    func.lower(Alert.title).contains(term) |
+                    func.lower(Alert.message).contains(term) |
+                    func.lower(Alert.category).contains(term)
+                    for term in terms
+                ]))
+            else:
+                alert_count_query = alert_count_query.where(Alert.application_id.is_(None), Alert.category.in_(["System", "Security"]))
+    # Inbox API returns at most 600 alerts, so keep the badge consistent with that cap.
+    alerts_open = min(db.scalar(alert_count_query) or 0, 600)
     now = utcnow()
     validity_rows = db.scalars(select(DocumentValidity).where(
         DocumentValidity.status.not_in(["Renewed", "Not Applicable"])
