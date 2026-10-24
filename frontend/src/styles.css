@@ -622,3 +622,14 @@ tbody tr:last-child td { border-bottom: 0; }
 .compliance-review-modal .modal-actions{flex:0 0 auto;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;padding:16px 26px 20px;margin:0;background:#f8fafd;border-top:1px solid #e2eaf3}
 .compliance-review-modal .modal-actions button{min-height:42px;border-radius:9px;font-size:13px;font-weight:750}
 @media(max-width:650px){.compliance-review-modal{max-height:94vh}.compliance-review-modal .modal-heading{padding:17px}.compliance-review-body{padding:16px}.compliance-review-modal .compliance-review-summary{grid-template-columns:1fr}.compliance-review-modal .form-row{grid-template-columns:1fr}.compliance-review-modal .modal-actions{padding:14px 16px}.compliance-review-modal .modal-actions button{flex:1 1 180px}}
+
+.correction-email-section{margin:22px 26px 0;padding:20px;border:1px solid #cfe0f2;background:#f6faff;border-radius:14px}
+.correction-email-section h3{margin:6px 0;color:#163452;font-size:17px;line-height:1.4}
+.correction-email-section p{margin:5px 0 16px;color:#5b7189;font-size:13px;line-height:1.6}
+.correction-email-section label{display:flex;flex-direction:column;gap:7px;margin-top:13px;color:#27425e;font-size:13px;font-weight:700}
+.correction-email-section input,.correction-email-section textarea{width:100%;box-sizing:border-box;border:1px solid #c8d8e9;border-radius:9px;padding:11px 12px;color:#193451;background:#fff;font:inherit;font-size:13px;line-height:1.55}
+.correction-email-section textarea{min-height:110px;resize:vertical}
+.correction-email-section input:focus,.correction-email-section textarea:focus{outline:3px solid rgba(60,125,190,.15);border-color:#6a9acb}
+.correction-email-section>.primary-button{margin-top:16px;min-height:42px;padding:10px 16px;border-radius:9px;font-weight:750}
+.correction-email-section>small{display:block;margin-top:9px;color:#687d95;font-size:11px;line-height:1.5}
+@media(max-width:650px){.correction-email-section{margin:18px 16px 0;padding:15px}.correction-email-section>.primary-button{width:100%}}
