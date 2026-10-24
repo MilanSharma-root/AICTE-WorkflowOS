@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { Activity, AlertTriangle, ArrowDownToLine, Bell, BookOpenCheck, Building2, CalendarClock, CheckCircle2, ChevronRight, ClipboardCheck, FileCheck2, FileText, LayoutDashboard, LogOut, Plus, Search, ShieldCheck, Users, Clock3, BarChart3, History, X, RefreshCw, Trash2 } from "lucide-react";
+import { Activity, AlertTriangle, ArrowDownToLine, Bell, BookOpenCheck, Building2, CalendarClock, CheckCircle2, ChevronRight, ClipboardCheck, FileCheck2, FileText, LayoutDashboard, LogOut, Plus, Search, ShieldCheck, Users, Clock3, BarChart3, History, X, RefreshCw, Trash2, House, Landmark, ShieldAlert, FileSearch, FolderOpen } from "lucide-react";
 
 const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 type User = { username: string; full_name: string; role: string };
