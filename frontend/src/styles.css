@@ -568,3 +568,12 @@ tbody tr:last-child td { border-bottom: 0; }
 .scrutiny-documents-only .detail-columns>section:first-child>.panel-heading h2,
 .scrutiny-documents-only .detail-columns>section:first-child>.panel-heading p{visibility:visible!important;opacity:1!important;clip:auto!important;overflow:visible}
 .scrutiny-documents-only .detail-columns{padding-top:24px!important}
+
+.compliance-evidence-modal{width:min(760px,calc(100vw - 32px));max-height:min(86vh,900px);overflow:auto}
+.compliance-evidence-modal .modal-heading h2{color:#132b49;font-size:23px;line-height:1.3;margin:5px 0}
+.compliance-evidence-modal .modal-heading p{color:#536a84;line-height:1.5;margin:6px 0 0}
+.compliance-evidence-modal .compliance-evidence-finding{border:1px solid #f0d5a8;background:#fff9ee;border-radius:12px;padding:18px 20px;margin:18px 0}
+.compliance-evidence-modal .compliance-evidence-finding p{font-size:15px;line-height:1.65;color:#243b57;margin:10px 0}
+.compliance-evidence-modal .compliance-evidence-finding small{display:block;color:#65758a;line-height:1.55}
+.compliance-evidence-modal .notice-box{line-height:1.6}
+@media(max-width:640px){.compliance-evidence-modal{width:calc(100vw - 20px);padding:16px}.compliance-evidence-modal .modal-actions{display:flex;flex-wrap:wrap}.compliance-evidence-modal .modal-actions button{flex:1 1 180px}}
