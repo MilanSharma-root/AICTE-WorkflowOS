@@ -1473,9 +1473,27 @@ def list_alerts(db: Session = Depends(get_db), user: User = Depends(require_role
                 Application.assigned_to.in_(owners),
                 Application.current_stage.in_(stages) if stages else True,
             )
-            query = query.where(
-                Alert.application_id.in_(relevant_app_ids)
-            )
+            query = query.where(Alert.application_id.in_(relevant_app_ids))
+            # Scope the alert itself as well as the application. An application
+            # can have compliance/ EVC alerts while its stage/assignee is stale.
+            # Do not leak those unrelated alert types into an officer's inbox.
+            alert_terms = {
+                "officer": ("intake", "application submitted", "application received"),
+                "reviewer": ("scrutiny", "re-scrutiny", "review", "returned to institution"),
+                "scrutiny_officer": ("scrutiny", "re-scrutiny", "document screening", "returned to institution", "application intake", "application submitted"),
+                "evc_officer": ("evc", "expert visit", "visit scheduling", "site visit"),
+                "sac_shc_officer": ("sac/shc", "sac", "shc", "committee review"),
+                "compliance_officer": ("compliance", "undertaking", "document expiring", "expired document", "deadline"),
+                "final_approval_officer": ("final approval", "approved", "approval decision"),
+            }
+            terms = alert_terms.get(user.role)
+            if terms:
+                query = query.where(or_(*[
+                    func.lower(Alert.title).contains(term) |
+                    func.lower(Alert.message).contains(term) |
+                    func.lower(Alert.category).contains(term)
+                    for term in terms
+                ]))
     rows = db.scalars(query).all()
     result = []
     for alert in rows:
