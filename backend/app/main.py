@@ -1477,21 +1477,36 @@ def update_evc(visit_id: int, payload: EVCVisitUpdate, db: Session = Depends(get
 @app.get("/api/v1/alerts")
 def list_alerts(db: Session = Depends(get_db), user: User = Depends(require_roles(*ALLOWED_ROLES))):
     sync_deadline_alerts(db)
-    # Keep the operational alert inbox manageable without deleting historical DB records.
-    # The latest 600 matching alerts are returned; admin/auditor can see the global register.
+    # Role-specific inbox: an alert must match both the alert type and the application's
+    # current assigned officer/stage. This prevents scrutiny alerts reaching SAC/SHC owners.
     query = select(Alert).order_by(Alert.created_at.desc(), Alert.id.desc())
     if user.role not in {"admin", "auditor"}:
         if user.role == "college":
-            query = query.where(Alert.application_id.is_(None) & Alert.category.in_(["System", "Security"]))
+            query = query.where(Alert.application_id.is_(None), Alert.category.in_(["System", "Security"]))
         else:
-            # Route alert types to the officer responsible for that workstream.
-            # Filter by alert content/category, not the application's possibly stale stage/assignee.
+            role_scope = {
+                "officer": ({"Case Officer", "Officer"}, {"Application Intake"}),
+                "reviewer": ({"Reviewer"}, {"Scrutiny", "Re-scrutiny"}),
+                "scrutiny_officer": ({"Scrutiny Officer", "Officer"}, {"Application Intake", "Scrutiny", "Re-scrutiny", "Returned to Institution"}),
+                "evc_officer": ({"EVC Officer"}, {"EVC Scheduling", "EVC Visit"}),
+                "sac_shc_officer": ({"SAC/SHC Officer"}, {"SAC/SHC Review"}),
+                "compliance_officer": ({"Compliance Officer"}, {"Compliance"}),
+                "final_approval_officer": ({"Final Approval Officer"}, {"Final Approval"}),
+            }
+            owners, stages = role_scope.get(user.role, (set(), set()))
+            owners = owners | {user.full_name}
+            # Require the linked application to be assigned to this role and still in its stage.
+            relevant_app_ids = select(Application.id).where(
+                Application.assigned_to.in_(owners),
+                Application.current_stage.in_(stages),
+            )
+            query = query.where(Alert.application_id.in_(relevant_app_ids))
             alert_terms = {
                 "officer": ("intake", "application submitted", "application received"),
                 "reviewer": ("scrutiny", "re-scrutiny", "review", "returned to institution"),
-                "scrutiny_officer": ("scrutiny", "re-scrutiny", "document screening", "returned to institution", "application intake", "application submitted"),
+                "scrutiny_officer": ("scrutiny", "re-scrutiny", "document screening", "returned to institution", "application intake", "application submitted", "assigned to scrutiny"),
                 "evc_officer": ("evc", "expert visit", "visit scheduling", "site visit"),
-                "sac_shc_officer": ("sac/shc", "sac", "shc", "committee review"),
+                "sac_shc_officer": ("sac/shc", "sac", "shc", "committee review", "assigned to sac"),
                 "compliance_officer": ("compliance", "undertaking", "document expiring", "expired document", "document validity", "deadline"),
                 "final_approval_officer": ("final approval", "approved", "approval decision"),
             }
@@ -1503,52 +1518,7 @@ def list_alerts(db: Session = Depends(get_db), user: User = Depends(require_role
                     func.lower(Alert.category).contains(term)
                     for term in terms
                 ]))
-            # A scrutiny officer must not see an EVC destination handoff merely because
-            # its message says the application passed scrutiny.
-            if user.role == "scrutiny_officer":
-                query = query.where(~(
-                    (func.lower(Alert.category) == "workflow handoff") &
-                    (func.lower(Alert.title).contains("handed off to evc"))
-                ))
-            else:
-                pass
-            if user.role == "scrutiny_officer":
-                query = query.where(~(
-                    (func.lower(Alert.category) == "workflow handoff") &
-                    (func.lower(Alert.message).contains("now in evc scheduling"))
-                ))
-            else:
-                query = query
-            if user.role not in {"scrutiny_officer"}:
-                query = query
-            if user.role == "scrutiny_officer":
-                query = query.where(~(
-                    (func.lower(Alert.category) == "workflow handoff") &
-                    (func.lower(Alert.title).contains("evc"))
-                ))
-            else:
-                query = query
-            if user.role == "scrutiny_officer":
-                query = query.where(~(
-                    (func.lower(Alert.category) == "workflow handoff") &
-                    (func.lower(Alert.message).contains("now at evc"))
-                ))
-            else:
-                query = query
-            if user.role == "scrutiny_officer":
-                query = query.where(~(
-                    (func.lower(Alert.category) == "workflow handoff") &
-                    (func.lower(Alert.title).contains("application handed off"))
-                ))
-            else:
-                query = query
-            if user.role == "scrutiny_officer":
-                query = query.where(~(
-                    (func.lower(Alert.category) == "workflow handoff") &
-                    (func.lower(Alert.message).contains("evc scheduling"))
-                ))
-            else:
-                query = query
+    # Bound response size; this does not delete database history.
     query = query.limit(600)
     rows = db.scalars(query).all()
     result = []
