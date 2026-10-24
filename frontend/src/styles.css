@@ -555,3 +555,16 @@ tbody tr:last-child td { border-bottom: 0; }
  .scrutiny-documents-only .quality-row .inline-actions{width:100%;gap:8px}
  .scrutiny-documents-only .quality-row .inline-actions button{flex:1 1 140px}
 }
+
+/* Prevent sticky application header from covering the document checklist heading. */
+.detail-only-shell .scrutiny-documents-only>.panel-heading:first-child,
+.scrutiny-documents-only>.panel-heading:first-child,
+.scrutiny-documents-only .detail-columns>section:first-child>.panel-heading{
+ position:relative!important;top:auto!important;z-index:1!important;scroll-margin-top:20px
+}
+.scrutiny-documents-only{overflow:visible}
+.scrutiny-documents-only .detail-columns>section:first-child{overflow:hidden}
+.scrutiny-documents-only .detail-columns>section:first-child>.panel-heading{min-height:unset;display:block}
+.scrutiny-documents-only .detail-columns>section:first-child>.panel-heading h2,
+.scrutiny-documents-only .detail-columns>section:first-child>.panel-heading p{visibility:visible!important;opacity:1!important;clip:auto!important;overflow:visible}
+.scrutiny-documents-only .detail-columns{padding-top:24px!important}
