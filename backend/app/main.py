@@ -7,7 +7,7 @@ import csv, io, json, threading, random
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, select, or_
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import Base, engine, get_db, SessionLocal
