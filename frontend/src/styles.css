@@ -656,3 +656,11 @@ tbody tr:last-child td { border-bottom: 0; }
  .compliance-review-modal .correction-email-section{margin:16px 16px;padding:14px}
  .compliance-review-modal .modal-actions{padding:12px 16px}
 }
+
+/* Ensure the compliance review modal itself scrolls vertically on every viewport. */
+.modal-backdrop:has(.compliance-review-modal){display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;overscroll-behavior:contain}
+.compliance-review-modal{flex:0 0 auto;margin:auto 0;max-height:calc(100dvh - 24px);height:auto;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-gutter:stable}
+.compliance-review-modal .compliance-review-body{overflow:visible;flex:none}
+.compliance-review-modal .correction-email-section{flex:none}
+.compliance-review-modal .modal-actions{position:sticky;bottom:0;z-index:2;background:#f8fafd;box-shadow:0 -6px 16px rgba(20,45,75,.06)}
+@media(max-height:760px){.compliance-review-modal{margin:12px 0;max-height:calc(100dvh - 24px)}}
