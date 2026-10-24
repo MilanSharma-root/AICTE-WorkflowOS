@@ -1506,9 +1506,23 @@ def list_alerts(db: Session = Depends(get_db), user: User = Depends(require_role
     return result
 
 @app.patch("/api/v1/alerts/{alert_id}/acknowledge")
-def acknowledge_alert(alert_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer"))):
+def acknowledge_alert(alert_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "officer", "reviewer", "scrutiny_officer", "evc_officer", "sac_shc_officer", "compliance_officer", "final_approval_officer"))):
     item = db.get(Alert, alert_id)
     if not item: raise HTTPException(404, "Alert not found")
+    # Officers may acknowledge only alerts relevant to their role; admins can acknowledge any alert.
+    if user.role not in {"admin", "officer"}:
+        role_terms = {
+            "reviewer": ("scrutiny", "re-scrutiny", "review", "returned to institution"),
+            "scrutiny_officer": ("scrutiny", "re-scrutiny", "document screening", "returned to institution", "application intake", "application submitted"),
+            "evc_officer": ("evc", "expert visit", "visit scheduling", "site visit"),
+            "sac_shc_officer": ("sac/shc", "sac", "shc", "committee review"),
+            "compliance_officer": ("compliance", "undertaking", "document expiring", "expired document", "deadline"),
+            "final_approval_officer": ("final approval", "approved", "approval decision"),
+        }
+        terms = role_terms.get(user.role, ())
+        haystack = f"{item.title or ''} {item.message or ''} {item.category or ''}".lower()
+        if not terms or not any(term in haystack for term in terms):
+            raise HTTPException(403, "You can acknowledge only alerts relevant to your role")
     item.acknowledged = True; item.acknowledged_by = user.full_name
     audit(db, "ALERT_ACKNOWLEDGED", user.full_name, item.application_id, item.title)
     db.commit()
